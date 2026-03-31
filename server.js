@@ -2,16 +2,27 @@ const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 const path = require("path");
-const db = require("./db");
+const mysql = require("mysql2/promise");
 
 const app = express();
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
+const pool = mysql.createPool({
+  host: process.env.MYSQLHOST,
+  user: process.env.MYSQLUSER,
+  password: process.env.MYSQLPASSWORD,
+  database: process.env.MYSQLDATABASE,
+  port: Number(process.env.MYSQLPORT || 3306),
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  ssl: { rejectUnauthorized: false }
+});
+
 app.get("/api/health", (req, res) => {
-  res.json({ success: true, message: "Smart Drain API Running" });
+  res.status(200).send("API is running");
 });
 
 // POST /register-authority
@@ -35,7 +46,7 @@ app.post("/register-authority", async (req, res) => {
       .update(String(password))
       .digest("hex");
 
-    await db.query(
+    await pool.query(
       `
       INSERT INTO authority_accounts
       (full_name, authority_id, designation, department, email, phone, zone, office_address, username, password_hash, created_at)
@@ -81,7 +92,7 @@ app.post("/sensor-data", async (req, res) => {
       });
     }
 
-    const dhi_score = (Number(water_level) * 0.6) + (Number(flow_rate) * 0.4);
+    const dhi_score = Number(water_level) * 0.6 + Number(flow_rate) * 0.4;
     let severity = "LOW";
     let alert = null;
 
@@ -91,7 +102,7 @@ app.post("/sensor-data", async (req, res) => {
       severity = "MEDIUM";
     }
 
-    await db.query(
+    await pool.query(
       `
       INSERT INTO sensor_readings (drain_id, water_level, flow_rate, dhi_score, timestamp)
       VALUES (?, ?, ?, ?, NOW())
@@ -100,7 +111,7 @@ app.post("/sensor-data", async (req, res) => {
     );
 
     if (severity === "HIGH" || severity === "MEDIUM") {
-      await db.query(
+      await pool.query(
         `
         INSERT INTO alerts (drain_id, alert_type, severity, timestamp)
         VALUES (?, ?, ?, NOW())
@@ -124,7 +135,7 @@ app.post("/sensor-data", async (req, res) => {
 // GET /drains
 app.get("/drains", async (req, res) => {
   try {
-    const [rows] = await db.query(`
+    const [rows] = await pool.query(`
       SELECT d.area_name, d.latitude, d.longitude,
              s.water_level_cm, s.flow_rate_min, s.timestamp
       FROM sensor_readings s
@@ -141,7 +152,7 @@ app.get("/drains", async (req, res) => {
 // GET /top-risk-drains
 app.get("/top-risk-drains", async (req, res) => {
   try {
-    const [rows] = await db.query(`
+    const [rows] = await pool.query(`
       SELECT drain_id, MAX(dhi_score) AS max_dhi
       FROM drain_health_log
       GROUP BY drain_id
@@ -157,7 +168,7 @@ app.get("/top-risk-drains", async (req, res) => {
 // GET /alerts
 app.get("/alerts", async (req, res) => {
   try {
-    const [rows] = await db.query(`
+    const [rows] = await pool.query(`
       SELECT * FROM alerts
       ORDER BY timestamp DESC
       LIMIT 100
@@ -172,7 +183,7 @@ app.get("/alerts", async (req, res) => {
 // GET /sensor-data
 app.get("/sensor-data", async (req, res) => {
   try {
-    const [rows] = await db.query(`
+    const [rows] = await pool.query(`
       SELECT * FROM sensor_readings
       ORDER BY timestamp DESC
     `);
@@ -193,7 +204,7 @@ app.get("/{*any}", (req, res) => {
 const PORT = process.env.PORT || 5000;
 
 async function ensureDhiColumn() {
-  await db.query(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS sensor_readings (
       reading_id INT PRIMARY KEY AUTO_INCREMENT,
       drain_id INT NOT NULL,
@@ -204,7 +215,7 @@ async function ensureDhiColumn() {
     )
   `);
 
-  const [waterLevelCheck] = await db.query(
+  const [waterLevelCheck] = await pool.query(
     `
     SELECT COUNT(*) AS count
     FROM INFORMATION_SCHEMA.COLUMNS
@@ -215,13 +226,13 @@ async function ensureDhiColumn() {
   );
 
   if (waterLevelCheck[0].count === 0) {
-    await db.query(`
+    await pool.query(`
       ALTER TABLE sensor_readings
       ADD COLUMN water_level FLOAT NOT NULL DEFAULT 0
     `);
   }
 
-  const [flowRateCheck] = await db.query(
+  const [flowRateCheck] = await pool.query(
     `
     SELECT COUNT(*) AS count
     FROM INFORMATION_SCHEMA.COLUMNS
@@ -232,13 +243,13 @@ async function ensureDhiColumn() {
   );
 
   if (flowRateCheck[0].count === 0) {
-    await db.query(`
+    await pool.query(`
       ALTER TABLE sensor_readings
       ADD COLUMN flow_rate FLOAT NOT NULL DEFAULT 0
     `);
   }
 
-  const [dhiScoreCheck] = await db.query(
+  const [dhiScoreCheck] = await pool.query(
     `
     SELECT COUNT(*) AS count
     FROM INFORMATION_SCHEMA.COLUMNS
@@ -249,13 +260,13 @@ async function ensureDhiColumn() {
   );
 
   if (dhiScoreCheck[0].count === 0) {
-    await db.query(`
+    await pool.query(`
       ALTER TABLE sensor_readings
       ADD COLUMN dhi_score FLOAT NOT NULL DEFAULT 0
     `);
   }
 
-  const [waterLevelCmCheck] = await db.query(
+  const [waterLevelCmCheck] = await pool.query(
     `
     SELECT COUNT(*) AS count
     FROM INFORMATION_SCHEMA.COLUMNS
@@ -265,7 +276,7 @@ async function ensureDhiColumn() {
     `
   );
 
-  const [flowRateMinCheck] = await db.query(
+  const [flowRateMinCheck] = await pool.query(
     `
     SELECT COUNT(*) AS count
     FROM INFORMATION_SCHEMA.COLUMNS
@@ -276,7 +287,7 @@ async function ensureDhiColumn() {
   );
 
   if (waterLevelCmCheck[0].count > 0 || flowRateMinCheck[0].count > 0) {
-    const [legacyData] = await db.query(`
+    const [legacyData] = await pool.query(`
       SELECT reading_id, water_level_cm, flow_rate_min
       FROM sensor_readings
       WHERE (water_level = 0 OR flow_rate = 0)
@@ -286,8 +297,8 @@ async function ensureDhiColumn() {
     for (const row of legacyData) {
       const water = Number(row.water_level_cm || 0);
       const flow = Number(row.flow_rate_min || 0);
-      const dhi = (water * 0.6) + (flow * 0.4);
-      await db.query(
+      const dhi = water * 0.6 + flow * 0.4;
+      await pool.query(
         `
         UPDATE sensor_readings
         SET water_level = ?, flow_rate = ?, dhi_score = ?
@@ -298,7 +309,7 @@ async function ensureDhiColumn() {
     }
   }
 
-  await db.query(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS alerts (
       alert_id INT PRIMARY KEY AUTO_INCREMENT,
       drain_id INT NOT NULL,
@@ -308,7 +319,7 @@ async function ensureDhiColumn() {
     )
   `);
 
-  const [alertRows] = await db.query(`
+  const [alertRows] = await pool.query(`
     SELECT COUNT(*) AS count
     FROM INFORMATION_SCHEMA.TABLES
     WHERE TABLE_SCHEMA = DATABASE()
@@ -316,7 +327,7 @@ async function ensureDhiColumn() {
   `);
 
   if (alertRows[0].count > 0) {
-    await db.query(`
+    await pool.query(`
       INSERT INTO alerts (drain_id, alert_type, severity, timestamp)
       SELECT a.log_id, a.alert_type, UPPER(a.severity), a.alert_time
       FROM alert a
@@ -331,7 +342,7 @@ async function ensureDhiColumn() {
 }
 
 async function ensureAuthorityAccountsTable() {
-  await db.query(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS authority_accounts (
       account_id INT PRIMARY KEY AUTO_INCREMENT,
       full_name VARCHAR(120) NOT NULL,
@@ -354,15 +365,27 @@ async function ensureAuthorityAccountsTable() {
 
 async function startServer() {
   try {
-    await ensureDhiColumn();
-    await ensureAuthorityAccountsTable();
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
+    const conn = await pool.getConnection();
+    await conn.query("SELECT 1");
+    conn.release();
+    console.log("Connected to Railway MySQL");
+
+    try {
+      await ensureDhiColumn();
+      await ensureAuthorityAccountsTable();
+      console.log("Database migrations/checks completed");
+    } catch (migrationErr) {
+      console.error("Database setup failed:", migrationErr.message);
+      console.error("Continuing server startup without DB setup");
+    }
   } catch (err) {
-    console.error("Failed to start server:", err.message);
-    process.exit(1);
+    console.error("Database connection failed:", err.message);
+    console.error("Starting server without database connection");
   }
+
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
 }
 
 startServer();
