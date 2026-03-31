@@ -81,54 +81,58 @@ app.post("/sensor-data", async (req, res) => {
   try {
     const { drain_id, water_level, flow_rate } = req.body;
 
-    if (
-      drain_id === undefined ||
-      water_level === undefined ||
-      flow_rate === undefined
-    ) {
+    // Validate required fields
+    if (!drain_id || water_level === undefined || flow_rate === undefined) {
       return res.status(400).json({
         success: false,
-        error: "drain_id, water_level and flow_rate are required"
+        error: "Missing required fields",
+        required: ["drain_id", "water_level", "flow_rate"]
       });
     }
 
-    const dhi_score = Number(water_level) * 0.6 + Number(flow_rate) * 0.4;
-    let severity = "LOW";
-    let alert = null;
+    // Validate data types
+    if (isNaN(drain_id) || isNaN(water_level) || isNaN(flow_rate)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid data types. drain_id, water_level, and flow_rate must be numbers"
+      });
+    }
 
-    if (dhi_score > 70) {
+    // Insert sensor reading
+    const result = await insertSensorReading(
+      parseInt(drain_id),
+      parseFloat(water_level),
+      parseFloat(flow_rate)
+    );
+
+    // Determine severity level based on DHI score
+    let severity = "LOW";
+    if (result.dhi_score > 70) {
       severity = "HIGH";
-    } else if (dhi_score > 40) {
+    } else if (result.dhi_score > 40) {
       severity = "MEDIUM";
     }
 
-    await pool.query(
-      `
-      INSERT INTO sensor_readings (drain_id, water_level, flow_rate, dhi_score, timestamp)
-      VALUES (?, ?, ?, ?, NOW())
-      `,
-      [drain_id, water_level, flow_rate, dhi_score]
-    );
-
-    if (severity === "HIGH" || severity === "MEDIUM") {
-      await pool.query(
-        `
-        INSERT INTO alerts (drain_id, alert_type, severity, timestamp)
-        VALUES (?, ?, ?, NOW())
-        `,
-        [drain_id, "Drain Health Risk", severity]
-      );
-      alert = severity;
-    }
-
-    res.json({
+    res.status(201).json({
       success: true,
-      dhi_score,
-      alert
+      message: "Sensor reading recorded successfully",
+      data: {
+        readingId: result.readingId,
+        drain_id: drain_id,
+        water_level: water_level,
+        flow_rate: flow_rate,
+        dhi_score: result.dhi_score,
+        severity: severity,
+        timestamp: result.timestamp
+      }
     });
   } catch (err) {
-    console.error("Error processing sensor data:", err);
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error in POST /sensor-data:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to process sensor data",
+      message: err.message
+    });
   }
 });
 
@@ -180,17 +184,206 @@ app.get("/alerts", async (req, res) => {
   }
 });
 
-// GET /sensor-data
+// ============================================
+// DATABASE INITIALIZATION & UTILITY FUNCTIONS
+// ============================================
+
+/**
+ * Initialize sensor_readings table if it doesn't exist
+ * Creates table with proper schema and error handling
+ */
+async function initializeSensorTable() {
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS sensor_readings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        drain_id INT NOT NULL,
+        water_level FLOAT NOT NULL,
+        flow_rate FLOAT NOT NULL,
+        dhi_score FLOAT NOT NULL,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_drain_id (drain_id),
+        INDEX idx_timestamp (timestamp)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    
+    console.log("✓ sensor_readings table initialized successfully");
+    return true;
+  } catch (err) {
+    console.error("✗ Error initializing sensor_readings table:", err.message);
+    throw err;
+  } finally {
+    if (connection) connection.release();
+  }
+}
+
+/**
+ * Insert sensor reading into database
+ * @param {number} drain_id - Drain identifier
+ * @param {number} water_level - Water level reading
+ * @param {number} flow_rate - Flow rate reading
+ * @returns {object} Result with reading ID and calculated DHI score
+ */
+async function insertSensorReading(drain_id, water_level, flow_rate) {
+  let connection;
+  try {
+    // Validate inputs
+    if (!drain_id || water_level === undefined || flow_rate === undefined) {
+      throw new Error("Missing required fields: drain_id, water_level, flow_rate");
+    }
+
+    // Calculate DHI score
+    const dhi_score = Number(water_level) * 0.6 + Number(flow_rate) * 0.4;
+
+    connection = await pool.getConnection();
+    
+    const [result] = await connection.execute(
+      `INSERT INTO sensor_readings (drain_id, water_level, flow_rate, dhi_score, timestamp)
+       VALUES (?, ?, ?, ?, NOW())`,
+      [drain_id, water_level, flow_rate, dhi_score]
+    );
+
+    return {
+      success: true,
+      readingId: result.insertId,
+      dhi_score: dhi_score,
+      timestamp: new Date().toISOString()
+    };
+  } catch (err) {
+    console.error("Error inserting sensor reading:", err.message);
+    throw err;
+  } finally {
+    if (connection) connection.release();
+  }
+}
+
+/**
+ * Fetch all sensor readings ordered by latest timestamp
+ * @param {number} limit - Maximum number of records (default: 100)
+ * @returns {array} Array of sensor readings
+ */
+async function getAllSensorReadings(limit = 100) {
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    
+    const [rows] = await connection.execute(
+      `SELECT id, drain_id, water_level, flow_rate, dhi_score, timestamp
+       FROM sensor_readings
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+      [limit]
+    );
+
+    return rows;
+  } catch (err) {
+    console.error("Error fetching sensor readings:", err.message);
+    throw err;
+  } finally {
+    if (connection) connection.release();
+  }
+}
+
+/**
+ * Fetch sensor readings for a specific drain
+ * @param {number} drain_id - Drain identifier
+ * @param {number} limit - Maximum number of records (default: 50)
+ * @returns {array} Array of sensor readings for the drain
+ */
+async function getSensorReadingsByDrain(drain_id, limit = 50) {
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    
+    const [rows] = await connection.execute(
+      `SELECT id, drain_id, water_level, flow_rate, dhi_score, timestamp
+       FROM sensor_readings
+       WHERE drain_id = ?
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+      [drain_id, limit]
+    );
+
+    return rows;
+  } catch (err) {
+    console.error("Error fetching sensor readings for drain:", err.message);
+    throw err;
+  } finally {
+    if (connection) connection.release();
+  }
+}
+
+// ============================================
+// API ROUTES
+// ============================================
+
+// GET /sensor-data - Fetch all sensor readings
 app.get("/sensor-data", async (req, res) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT * FROM sensor_readings
-      ORDER BY timestamp DESC
-    `);
+    const limit = req.query.limit ? parseInt(req.query.limit) : 100;
+    
+    if (isNaN(limit) || limit < 1 || limit > 1000) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid limit parameter. Must be between 1 and 1000"
+      });
+    }
 
-    res.json({ success: true, data: rows });
+    const data = await getAllSensorReadings(limit);
+
+    res.json({
+      success: true,
+      count: data.length,
+      data: data
+    });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error in GET /sensor-data:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch sensor readings",
+      message: err.message
+    });
+  }
+});
+
+// GET /sensor-data/:drain_id - Fetch sensor readings for specific drain
+app.get("/sensor-data/:drain_id", async (req, res) => {
+  try {
+    const drain_id = parseInt(req.params.drain_id);
+    const limit = req.query.limit ? parseInt(req.query.limit) : 50;
+
+    if (isNaN(drain_id)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid drain_id. Must be a number"
+      });
+    }
+
+    if (isNaN(limit) || limit < 1 || limit > 500) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid limit parameter. Must be between 1 and 500"
+      });
+    }
+
+    const data = await getSensorReadingsByDrain(drain_id, limit);
+
+    res.json({
+      success: true,
+      drain_id: drain_id,
+      count: data.length,
+      data: data
+    });
+  } catch (err) {
+    console.error("Error in GET /sensor-data/:drain_id:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch sensor readings for drain",
+      message: err.message
+    });
   }
 });
 
@@ -203,189 +396,79 @@ app.get("/{*any}", (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-async function ensureDhiColumn() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS sensor_readings (
-      reading_id INT PRIMARY KEY AUTO_INCREMENT,
-      drain_id INT NOT NULL,
-      water_level FLOAT NOT NULL,
-      flow_rate FLOAT NOT NULL,
-      dhi_score FLOAT NOT NULL,
-      timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  const [waterLevelCheck] = await pool.query(
-    `
-    SELECT COUNT(*) AS count
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'sensor_readings'
-      AND COLUMN_NAME = 'water_level'
-    `
-  );
-
-  if (waterLevelCheck[0].count === 0) {
-    await pool.query(`
-      ALTER TABLE sensor_readings
-      ADD COLUMN water_level FLOAT NOT NULL DEFAULT 0
-    `);
-  }
-
-  const [flowRateCheck] = await pool.query(
-    `
-    SELECT COUNT(*) AS count
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'sensor_readings'
-      AND COLUMN_NAME = 'flow_rate'
-    `
-  );
-
-  if (flowRateCheck[0].count === 0) {
-    await pool.query(`
-      ALTER TABLE sensor_readings
-      ADD COLUMN flow_rate FLOAT NOT NULL DEFAULT 0
-    `);
-  }
-
-  const [dhiScoreCheck] = await pool.query(
-    `
-    SELECT COUNT(*) AS count
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'sensor_readings'
-      AND COLUMN_NAME = 'dhi_score'
-    `
-  );
-
-  if (dhiScoreCheck[0].count === 0) {
-    await pool.query(`
-      ALTER TABLE sensor_readings
-      ADD COLUMN dhi_score FLOAT NOT NULL DEFAULT 0
-    `);
-  }
-
-  const [waterLevelCmCheck] = await pool.query(
-    `
-    SELECT COUNT(*) AS count
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'sensor_readings'
-      AND COLUMN_NAME = 'water_level_cm'
-    `
-  );
-
-  const [flowRateMinCheck] = await pool.query(
-    `
-    SELECT COUNT(*) AS count
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'sensor_readings'
-      AND COLUMN_NAME = 'flow_rate_min'
-    `
-  );
-
-  if (waterLevelCmCheck[0].count > 0 || flowRateMinCheck[0].count > 0) {
-    const [legacyData] = await pool.query(`
-      SELECT reading_id, water_level_cm, flow_rate_min
-      FROM sensor_readings
-      WHERE (water_level = 0 OR flow_rate = 0)
-        AND (water_level_cm IS NOT NULL OR flow_rate_min IS NOT NULL)
-    `);
-
-    for (const row of legacyData) {
-      const water = Number(row.water_level_cm || 0);
-      const flow = Number(row.flow_rate_min || 0);
-      const dhi = water * 0.6 + flow * 0.4;
-      await pool.query(
-        `
-        UPDATE sensor_readings
-        SET water_level = ?, flow_rate = ?, dhi_score = ?
-        WHERE reading_id = ?
-        `,
-        [water, flow, dhi, row.reading_id]
-      );
-    }
-  }
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS alerts (
-      alert_id INT PRIMARY KEY AUTO_INCREMENT,
-      drain_id INT NOT NULL,
-      alert_type VARCHAR(120) NOT NULL,
-      severity VARCHAR(20) NOT NULL,
-      timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  const [alertRows] = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM INFORMATION_SCHEMA.TABLES
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'alert'
-  `);
-
-  if (alertRows[0].count > 0) {
-    await pool.query(`
-      INSERT INTO alerts (drain_id, alert_type, severity, timestamp)
-      SELECT a.log_id, a.alert_type, UPPER(a.severity), a.alert_time
-      FROM alert a
-      LEFT JOIN alerts b
-        ON b.drain_id = a.log_id
-       AND b.alert_type = a.alert_type
-       AND b.severity = UPPER(a.severity)
-       AND b.timestamp = a.alert_time
-      WHERE b.alert_id IS NULL
-    `);
-  }
-}
-
 async function ensureAuthorityAccountsTable() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS authority_accounts (
-      account_id INT PRIMARY KEY AUTO_INCREMENT,
-      full_name VARCHAR(120) NOT NULL,
-      authority_id VARCHAR(60) NOT NULL,
-      designation VARCHAR(100) NOT NULL,
-      department VARCHAR(120) NOT NULL,
-      email VARCHAR(120) NOT NULL,
-      phone VARCHAR(30) NOT NULL,
-      zone VARCHAR(100) NOT NULL,
-      office_address VARCHAR(255) NOT NULL,
-      username VARCHAR(80) NOT NULL,
-      password_hash VARCHAR(255) NOT NULL,
-      created_at DATETIME NOT NULL,
-      UNIQUE KEY uq_authority_id (authority_id),
-      UNIQUE KEY uq_email (email),
-      UNIQUE KEY uq_username (username)
-    )
-  `);
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS authority_accounts (
+        account_id INT PRIMARY KEY AUTO_INCREMENT,
+        full_name VARCHAR(120) NOT NULL,
+        authority_id VARCHAR(60) NOT NULL,
+        designation VARCHAR(100) NOT NULL,
+        department VARCHAR(120) NOT NULL,
+        email VARCHAR(120) NOT NULL,
+        phone VARCHAR(30) NOT NULL,
+        zone VARCHAR(100) NOT NULL,
+        office_address VARCHAR(255) NOT NULL,
+        username VARCHAR(80) NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at DATETIME NOT NULL,
+        UNIQUE KEY uq_authority_id (authority_id),
+        UNIQUE KEY uq_email (email),
+        UNIQUE KEY uq_username (username)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    
+    console.log("✓ authority_accounts table initialized successfully");
+  } catch (err) {
+    console.error("✗ Error initializing authority_accounts table:", err.message);
+    // Don't throw - allow server to continue
+  } finally {
+    if (connection) connection.release();
+  }
 }
 
+/**
+ * Initialize database on server startup
+ */
+async function initializeDatabase() {
+  try {
+    // Test connection
+    const connection = await pool.getConnection();
+    await connection.execute("SELECT 1");
+    connection.release();
+    console.log("✓ Connected to MySQL database");
+
+    // Initialize tables
+    await initializeSensorTable();
+    await ensureAuthorityAccountsTable();
+    
+    console.log("✓ All database tables initialized successfully");
+    return true;
+  } catch (err) {
+    console.error("✗ Database initialization error:", err.message);
+    console.warn("⚠ Continuing without database setup - ensure database is configured");
+    return false;
+  }
+}
+
+/**
+ * Start Express server
+ */
 async function startServer() {
   try {
-    const conn = await pool.getConnection();
-    await conn.query("SELECT 1");
-    conn.release();
-    console.log("Connected to Railway MySQL");
-
-    try {
-      await ensureDhiColumn();
-      await ensureAuthorityAccountsTable();
-      console.log("Database migrations/checks completed");
-    } catch (migrationErr) {
-      console.error("Database setup failed:", migrationErr.message);
-      console.error("Continuing server startup without DB setup");
-    }
+    await initializeDatabase();
   } catch (err) {
-    console.error("Database connection failed:", err.message);
-    console.error("Starting server without database connection");
+    console.error("Database initialization failed:", err.message);
   }
 
   app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`✓ Server running on port ${PORT}`);
+    console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
   });
 }
 
+// Start the server
 startServer();
