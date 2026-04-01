@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import API_BASE from "../config/api";
 
 function Register({ setPage }) {
   const [showPassword, setShowPassword] = useState(false);
@@ -29,6 +30,13 @@ function Register({ setPage }) {
   const handleSubmit = async (event) => {
     event.preventDefault();
 
+    if (!API_BASE) {
+      console.error("REACT_APP_BACKEND_URL is undefined. Register API calls cannot run.");
+      setStatusType("error");
+      setStatusMessage("Backend URL is not configured.");
+      return;
+    }
+
     if (formData.password !== formData.confirmPassword) {
       setStatusType("error");
       setStatusMessage("Passwords do not match.");
@@ -40,7 +48,7 @@ function Register({ setPage }) {
     setStatusMessage("");
 
     try {
-      const response = await fetch("/register-authority", {
+      const response = await fetch(`${API_BASE}/register-authority`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"

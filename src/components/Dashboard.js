@@ -1,14 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
   Legend,
-  Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -16,81 +12,89 @@ import {
   XAxis,
   YAxis
 } from "recharts";
+import API_BASE from "../config/api";
 
 function Dashboard() {
-  const [sensorData, setSensorData] = useState([]);
+  const [latestStatus, setLatestStatus] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [drains, setDrains] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let isMounted = true;
+
     const fetchDashboardData = async () => {
+      if (!API_BASE) {
+        console.error("REACT_APP_BACKEND_URL is undefined. Dashboard API calls cannot run.");
+        setError("Backend URL is not configured");
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         setError("");
 
-        const [sensorResponse, alertsResponse] = await Promise.all([
-          fetch("/sensor-data"),
-          fetch("/alerts")
+        const [latestResponse, alertsResponse, drainsResponse] = await Promise.all([
+          fetch(`${API_BASE}/api/latest-status`),
+          fetch(`${API_BASE}/api/alerts`),
+          fetch(`${API_BASE}/api/drains`)
         ]);
 
-        if (!sensorResponse.ok || !alertsResponse.ok) {
+        if (!latestResponse.ok || !alertsResponse.ok || !drainsResponse.ok) {
           throw new Error("Unable to fetch dashboard data");
         }
 
-        const sensorJson = await sensorResponse.json();
-        const alertsJson = await alertsResponse.json();
+        const [latestJson, alertsJson, drainsJson] = await Promise.all([
+          latestResponse.json(),
+          alertsResponse.json(),
+          drainsResponse.json()
+        ]);
 
-        setSensorData(Array.isArray(sensorJson?.data) ? sensorJson.data : []);
+        if (!isMounted) {
+          return;
+        }
+
+        setLatestStatus(Array.isArray(latestJson?.data) ? latestJson.data : []);
         setAlerts(Array.isArray(alertsJson?.data) ? alertsJson.data : []);
+        setDrains(Array.isArray(drainsJson?.data) ? drainsJson.data : []);
       } catch (err) {
-        setError(err.message || "Failed to load dashboard");
+        if (isMounted) {
+          setError(err.message || "Failed to load dashboard");
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
     fetchDashboardData();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const kpi = useMemo(() => {
-    const uniqueDrains = new Set(sensorData.map((row) => row.drain_id)).size;
-    const totalAlerts = alerts.length;
-    const highRiskAlerts = alerts.filter(
-      (row) => String(row.severity || "").toUpperCase() === "HIGH"
-    ).length;
-
-    const avgDhi = sensorData.length
-      ? sensorData.reduce((sum, row) => sum + Number(row.dhi_score || 0), 0) /
-        sensorData.length
-      : 0;
-
-    return {
-      totalDrains: uniqueDrains,
-      totalAlerts,
-      highRiskAlerts,
-      averageDhi: avgDhi
-    };
-  }, [sensorData, alerts]);
-
-  const lineData = useMemo(
+  const drainChartData = useMemo(
     () =>
-      sensorData
-        .slice(0, 20)
-        .reverse()
+      latestStatus
         .map((row) => ({
-          timestamp: row.timestamp,
-          timeLabel: new Date(row.timestamp).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit"
-          }),
-          dhi_score: Number(row.dhi_score || 0)
-        })),
-    [sensorData]
+          drain_id: String(row.drain_id),
+          label: row.area_name ? `${row.area_name} (${row.drain_id})` : `Drain ${row.drain_id}`,
+          dhi_score: Number(row.dhi_score || 0),
+          status: row.status || "Unknown",
+          timestamp: row.timestamp || null
+        }))
+        .sort((a, b) => Number(a.drain_id) - Number(b.drain_id))
+        .slice(0, 20),
+    [latestStatus]
   );
 
   const pieData = useMemo(() => {
     const severityMap = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+
     alerts.forEach((row) => {
       const key = String(row.severity || "").toUpperCase();
       if (severityMap[key] !== undefined) {
@@ -105,26 +109,55 @@ function Dashboard() {
     ];
   }, [alerts]);
 
-  const topRiskDrains = useMemo(() => {
-    const grouped = sensorData.reduce((acc, row) => {
-      const id = row.drain_id;
-      if (!acc[id]) {
-        acc[id] = { drain_id: id, sum: 0, count: 0 };
-      }
+  const topRiskDrains = useMemo(
+    () =>
+      [...drainChartData]
+        .sort((a, b) => b.dhi_score - a.dhi_score)
+        .slice(0, 5)
+        .map((row) => ({
+          drain_id: row.label,
+          avg_dhi: Number(row.dhi_score.toFixed(2))
+        })),
+    [drainChartData]
+  );
 
-      acc[id].sum += Number(row.dhi_score || 0);
-      acc[id].count += 1;
-      return acc;
-    }, {});
+  const drainSnapshot = useMemo(
+    () =>
+      drains.slice(0, 8).map((row) => {
+        const latest = latestStatus.find(
+          (statusRow) => String(statusRow.drain_id) === String(row.drain_id)
+        );
 
-    return Object.values(grouped)
-      .map((item) => ({
-        drain_id: String(item.drain_id),
-        avg_dhi: Number((item.sum / item.count).toFixed(2))
-      }))
-      .sort((a, b) => b.avg_dhi - a.avg_dhi)
-      .slice(0, 5);
-  }, [sensorData]);
+        return {
+          drain_id: row.drain_id,
+          area_name: row.area_name,
+          dhi_score: latest ? Number(latest.dhi_score || 0) : null,
+          status: latest?.status || "Unknown",
+          latest_timestamp: latest?.timestamp || row.latest_timestamp || null
+        };
+      }),
+    [drains, latestStatus]
+  );
+
+  const kpi = useMemo(() => {
+    const uniqueDrains = drains.length || new Set(latestStatus.map((row) => row.drain_id)).size;
+    const totalAlerts = alerts.length;
+    const highRiskAlerts = alerts.filter(
+      (row) => String(row.severity || "").toUpperCase() === "HIGH"
+    ).length;
+
+    const avgDhi = latestStatus.length
+      ? latestStatus.reduce((sum, row) => sum + Number(row.dhi_score || 0), 0) /
+        latestStatus.length
+      : 0;
+
+    return {
+      totalDrains: uniqueDrains,
+      totalAlerts,
+      highRiskAlerts,
+      averageDhi: avgDhi
+    };
+  }, [drains, latestStatus, alerts]);
 
   if (loading) {
     return (
@@ -146,7 +179,7 @@ function Dashboard() {
     );
   }
 
-  if (!sensorData.length && !alerts.length) {
+  if (!latestStatus.length && !alerts.length && !drains.length) {
     return (
       <section className="stats-section">
         <div className="container">
@@ -194,41 +227,20 @@ function Dashboard() {
 
         <div className="dashboard-charts-grid">
           <article className="dashboard-chart-card">
-            <h3>DHI Trend Over Time</h3>
-            <p className="chart-subtitle">Tracks how Drain Health Index changes across recent readings.</p>
+            <h3>Latest DHI by Drain</h3>
+            <p className="chart-subtitle">Shows the latest Drain Health Index snapshot for each drain.</p>
             <div className="chart-area">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={lineData}>
-                  <defs>
-                    <linearGradient id="dhiGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#00c6ff" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="#00c6ff" stopOpacity={0.03} />
-                    </linearGradient>
-                  </defs>
+                <BarChart data={drainChartData} barCategoryGap="28%">
                   <CartesianGrid stroke="#d8e5f4" strokeDasharray="4 4" />
                   <XAxis
-                    dataKey="timeLabel"
-                    label={{ value: "Time", position: "insideBottom", offset: -5 }}
+                    dataKey="label"
+                    label={{ value: "Drain", position: "insideBottom", offset: -5 }}
                   />
-                  <YAxis
-                    label={{ value: "DHI Score", angle: -90, position: "insideLeft" }}
-                  />
+                  <YAxis label={{ value: "DHI Score", angle: -90, position: "insideLeft" }} />
                   <Tooltip />
-                  <Area
-                    type="monotone"
-                    dataKey="dhi_score"
-                    stroke="none"
-                    fill="url(#dhiGradient)"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="dhi_score"
-                    stroke="#0f7dd9"
-                    strokeWidth={3}
-                    dot={false}
-                    activeDot={false}
-                  />
-                </AreaChart>
+                  <Bar dataKey="dhi_score" fill="#0f7dd9" radius={[8, 8, 0, 0]} maxBarSize={52} />
+                </BarChart>
               </ResponsiveContainer>
             </div>
           </article>
@@ -258,19 +270,56 @@ function Dashboard() {
           </article>
 
           <article className="dashboard-chart-card dashboard-chart-wide">
-            <h3>Top Risk Drains (Based on Average DHI Score)</h3>
-            <p className="chart-subtitle">Identifies highest-risk drains by average DHI score.</p>
+            <h3>Drain Snapshot</h3>
+            <p className="chart-subtitle">Latest monitored drains with their current status.</p>
+            <div className="chart-area">
+              {drainSnapshot.length > 0 ? (
+                <div className="alerts-table-wrap">
+                  <table className="alerts-table">
+                    <thead>
+                      <tr>
+                        <th>Drain</th>
+                        <th>Area</th>
+                        <th>DHI</th>
+                        <th>Status</th>
+                        <th>Updated</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {drainSnapshot.map((row) => (
+                        <tr key={row.drain_id}>
+                          <td>{row.drain_id}</td>
+                          <td>{row.area_name || "Unknown"}</td>
+                          <td>{row.dhi_score !== null ? row.dhi_score.toFixed(2) : "-"}</td>
+                          <td>{row.status}</td>
+                          <td>
+                            {row.latest_timestamp
+                              ? new Date(row.latest_timestamp).toLocaleString()
+                              : "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="dashboard-state-card">No drain snapshot available.</p>
+              )}
+            </div>
+          </article>
+
+          <article className="dashboard-chart-card dashboard-chart-wide">
+            <h3>Highest Risk Drains</h3>
+            <p className="chart-subtitle">Identifies the drains with the highest latest DHI score.</p>
             <div className="chart-area">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={topRiskDrains} barCategoryGap="28%">
                   <CartesianGrid stroke="#d8e5f4" strokeDasharray="4 4" />
                   <XAxis
                     dataKey="drain_id"
-                    label={{ value: "Drain ID", position: "insideBottom", offset: -5 }}
+                    label={{ value: "Drain", position: "insideBottom", offset: -5 }}
                   />
-                  <YAxis
-                    label={{ value: "Average DHI Score", angle: -90, position: "insideLeft" }}
-                  />
+                  <YAxis label={{ value: "Latest DHI Score", angle: -90, position: "insideLeft" }} />
                   <Tooltip />
                   <Bar dataKey="avg_dhi" fill="#1f68ad" radius={[8, 8, 0, 0]} maxBarSize={52} />
                 </BarChart>

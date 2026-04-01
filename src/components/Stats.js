@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import API_BASE from "../config/api";
 
 function Stats() {
   const [totalDrains, setTotalDrains] = useState(0);
@@ -8,13 +9,20 @@ function Stats() {
 
   useEffect(() => {
     const fetchStats = async () => {
+      if (!API_BASE) {
+        console.error("REACT_APP_BACKEND_URL is undefined. Stats API calls cannot run.");
+        setError("Backend URL is not configured");
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         setError("");
 
         const [drainsRes, alertsRes] = await Promise.all([
-          fetch("/drains"),
-          fetch("/alerts")
+          fetch(`${API_BASE}/api/drains`),
+          fetch(`${API_BASE}/api/alerts`)
         ]);
 
         if (!drainsRes.ok || !alertsRes.ok) {
@@ -25,9 +33,7 @@ function Stats() {
         const alertsJson = await alertsRes.json();
 
         const drainsCount = Array.isArray(drainsJson?.data) ? drainsJson.data.length : 0;
-        const alertsCount = Array.isArray(alertsJson?.data)
-          ? alertsJson.data.reduce((sum, row) => sum + Number(row.total || 0), 0)
-          : 0;
+        const alertsCount = Array.isArray(alertsJson?.data) ? alertsJson.data.length : 0;
 
         setTotalDrains(drainsCount);
         setTotalAlerts(alertsCount);

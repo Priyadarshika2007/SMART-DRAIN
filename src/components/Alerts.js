@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import API_BASE from "../config/api";
 
 function Alerts() {
   const [alerts, setAlerts] = useState([]);
@@ -7,12 +8,18 @@ function Alerts() {
 
   useEffect(() => {
     const fetchAlerts = async () => {
+      if (!API_BASE) {
+        console.error("REACT_APP_BACKEND_URL is undefined. Alerts API calls cannot run.");
+        setError("Backend URL is not configured");
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         setError("");
 
-        const response = await fetch("/alerts");
-        console.log(response);
+        const response = await fetch(`${API_BASE}/api/alerts`);
         if (!response.ok) {
           throw new Error("Failed to fetch alerts");
         }

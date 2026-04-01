@@ -1,474 +1,263 @@
-const express = require("express");
-const cors = require("cors");
-const crypto = require("crypto");
-const path = require("path");
-const mysql = require("mysql2/promise");
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import testRoutes from './routes/test.js';
+import sensorRoutes from './routes/sensor.js';
+import dashboardRoutes from './routes/dashboard.js';
+import { closePool } from './config/db.js';
+import { apiRateLimiter, secureHeaders, safeLog } from './middleware/security.js';
+
+// Load environment variables
+dotenv.config();
+
+// ============================================
+// ENVIRONMENT VALIDATION
+// ============================================
+
+const requiredEnvVars = ['DATABASE_URL'];
+const missingVars = requiredEnvVars.filter((envVar) => !process.env[envVar]);
+
+if (missingVars.length > 0) {
+  throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+}
+
+console.log('[CONFIG] Environment variables validated ✓\n');
+
+// ============================================
+// EXPRESS APP SETUP
+// ============================================
 
 const app = express();
+app.disable('x-powered-by');
 
-app.use(cors());
+// Middleware
+app.use(secureHeaders);
 app.use(express.json());
+app.use(cors({ origin: '*' }));
+app.use('/api', apiRateLimiter);
 
-const pool = mysql.createPool({
-  host: process.env.MYSQLHOST,
-  user: process.env.MYSQLUSER,
-  password: process.env.MYSQLPASSWORD,
-  database: process.env.MYSQLDATABASE,
-  port: Number(process.env.MYSQLPORT || 3306),
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  ssl: { rejectUnauthorized: false }
-});
+// Request logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
 
-app.get("/api/health", (req, res) => {
-  res.status(200).send("API is running");
-});
-
-// POST /register-authority
-app.post("/register-authority", async (req, res) => {
-  try {
-    const {
-      fullName,
-      authorityId,
-      designation,
-      department,
-      email,
-      phone,
-      zone,
-      officeAddress,
-      username,
-      password
-    } = req.body;
-
-    const passwordHash = crypto
-      .createHash("sha256")
-      .update(String(password))
-      .digest("hex");
-
-    await pool.query(
-      `
-      INSERT INTO authority_accounts
-      (full_name, authority_id, designation, department, email, phone, zone, office_address, username, password_hash, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-      `,
-      [
-        fullName,
-        authorityId,
-        designation,
-        department,
-        email,
-        phone,
-        zone,
-        officeAddress,
-        username,
-        passwordHash
-      ]
-    );
-
-    res.json({
-      success: true,
-      message: "Account created successfully"
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const statusColor = res.statusCode >= 400 ? '❌' : '✓';
+    safeLog(`${statusColor} [REQ]`, {
+      method: req.method,
+      route: req.path,
+      status: res.statusCode,
+      durationMs: duration,
+      time: new Date().toISOString(),
     });
-  } catch (err) {
-    console.error("Error creating authority account:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+  });
 
-// POST /sensor-data
-app.post("/sensor-data", async (req, res) => {
-  try {
-    const { drain_id, water_level, flow_rate } = req.body;
-
-    // Validate required fields
-    if (!drain_id || water_level === undefined || flow_rate === undefined) {
-      return res.status(400).json({
-        success: false,
-        error: "Missing required fields",
-        required: ["drain_id", "water_level", "flow_rate"]
-      });
-    }
-
-    // Validate data types
-    if (isNaN(drain_id) || isNaN(water_level) || isNaN(flow_rate)) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid data types. drain_id, water_level, and flow_rate must be numbers"
-      });
-    }
-
-    // Insert sensor reading
-    const result = await insertSensorReading(
-      parseInt(drain_id),
-      parseFloat(water_level),
-      parseFloat(flow_rate)
-    );
-
-    // Determine severity level based on DHI score
-    let severity = "LOW";
-    if (result.dhi_score > 70) {
-      severity = "HIGH";
-    } else if (result.dhi_score > 40) {
-      severity = "MEDIUM";
-    }
-
-    res.status(201).json({
-      success: true,
-      message: "Sensor reading recorded successfully",
-      data: {
-        readingId: result.readingId,
-        drain_id: drain_id,
-        water_level: water_level,
-        flow_rate: flow_rate,
-        dhi_score: result.dhi_score,
-        severity: severity,
-        timestamp: result.timestamp
-      }
-    });
-  } catch (err) {
-    console.error("Error in POST /sensor-data:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to process sensor data",
-      message: err.message
-    });
-  }
-});
-
-// GET /drains
-app.get("/drains", async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT d.area_name, d.latitude, d.longitude,
-             s.water_level_cm, s.flow_rate_min, s.timestamp
-      FROM sensor_readings s
-      JOIN drain_master d ON s.drain_id = d.drain_id
-      ORDER BY s.timestamp DESC
-      LIMIT 20
-    `);
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /top-risk-drains
-app.get("/top-risk-drains", async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT drain_id, MAX(dhi_score) AS max_dhi
-      FROM drain_health_log
-      GROUP BY drain_id
-      ORDER BY max_dhi DESC
-      LIMIT 10
-    `);
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /alerts
-app.get("/alerts", async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT * FROM alerts
-      ORDER BY timestamp DESC
-      LIMIT 100
-    `);
-
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+  next();
 });
 
 // ============================================
-// DATABASE INITIALIZATION & UTILITY FUNCTIONS
+// ROUTES
 // ============================================
 
-/**
- * Initialize sensor_readings table if it doesn't exist
- * Creates table with proper schema and error handling
- */
-async function initializeSensorTable() {
-  let connection;
-  try {
-    connection = await pool.getConnection();
-    
-    await connection.execute(`
-      CREATE TABLE IF NOT EXISTS sensor_readings (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        drain_id INT NOT NULL,
-        water_level FLOAT NOT NULL,
-        flow_rate FLOAT NOT NULL,
-        dhi_score FLOAT NOT NULL,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_drain_id (drain_id),
-        INDEX idx_timestamp (timestamp)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-    
-    console.log("✓ sensor_readings table initialized successfully");
-    return true;
-  } catch (err) {
-    console.error("✗ Error initializing sensor_readings table:", err.message);
-    throw err;
-  } finally {
-    if (connection) connection.release();
-  }
-}
+// Root endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Smart Drain API - Supabase PostgreSQL Backend',
+    version: '1.0.0',
+    status: 'running',
+    endpoints: {
+      health: 'GET /api/health',
+      testDb: 'GET /api/test-db',
+      dbStatus: 'GET /api/db-status',
+      docs: 'GET /docs',
+    },
+  });
+});
 
-/**
- * Insert sensor reading into database
- * @param {number} drain_id - Drain identifier
- * @param {number} water_level - Water level reading
- * @param {number} flow_rate - Flow rate reading
- * @returns {object} Result with reading ID and calculated DHI score
- */
-async function insertSensorReading(drain_id, water_level, flow_rate) {
-  let connection;
-  try {
-    // Validate inputs
-    if (!drain_id || water_level === undefined || flow_rate === undefined) {
-      throw new Error("Missing required fields: drain_id, water_level, flow_rate");
-    }
+// API Routes
+app.use('/api', dashboardRoutes);
+app.use('/api', sensorRoutes);
+app.use('/api', testRoutes);
 
-    // Calculate DHI score
-    const dhi_score = Number(water_level) * 0.6 + Number(flow_rate) * 0.4;
-
-    connection = await pool.getConnection();
-    
-    const [result] = await connection.execute(
-      `INSERT INTO sensor_readings (drain_id, water_level, flow_rate, dhi_score, timestamp)
-       VALUES (?, ?, ?, ?, NOW())`,
-      [drain_id, water_level, flow_rate, dhi_score]
-    );
-
-    return {
-      success: true,
-      readingId: result.insertId,
-      dhi_score: dhi_score,
-      timestamp: new Date().toISOString()
-    };
-  } catch (err) {
-    console.error("Error inserting sensor reading:", err.message);
-    throw err;
-  } finally {
-    if (connection) connection.release();
-  }
-}
-
-/**
- * Fetch all sensor readings ordered by latest timestamp
- * @param {number} limit - Maximum number of records (default: 100)
- * @returns {array} Array of sensor readings
- */
-async function getAllSensorReadings(limit = 100) {
-  let connection;
-  try {
-    connection = await pool.getConnection();
-    
-    const [rows] = await connection.execute(
-      `SELECT id, drain_id, water_level, flow_rate, dhi_score, timestamp
-       FROM sensor_readings
-       ORDER BY timestamp DESC
-       LIMIT ?`,
-      [limit]
-    );
-
-    return rows;
-  } catch (err) {
-    console.error("Error fetching sensor readings:", err.message);
-    throw err;
-  } finally {
-    if (connection) connection.release();
-  }
-}
-
-/**
- * Fetch sensor readings for a specific drain
- * @param {number} drain_id - Drain identifier
- * @param {number} limit - Maximum number of records (default: 50)
- * @returns {array} Array of sensor readings for the drain
- */
-async function getSensorReadingsByDrain(drain_id, limit = 50) {
-  let connection;
-  try {
-    connection = await pool.getConnection();
-    
-    const [rows] = await connection.execute(
-      `SELECT id, drain_id, water_level, flow_rate, dhi_score, timestamp
-       FROM sensor_readings
-       WHERE drain_id = ?
-       ORDER BY timestamp DESC
-       LIMIT ?`,
-      [drain_id, limit]
-    );
-
-    return rows;
-  } catch (err) {
-    console.error("Error fetching sensor readings for drain:", err.message);
-    throw err;
-  } finally {
-    if (connection) connection.release();
-  }
-}
+// Documentation endpoint
+app.get('/docs', (req, res) => {
+  res.status(200).json({
+    title: 'Smart Drain API Documentation',
+    version: '1.0.0',
+    baseUrl: `http://localhost:${process.env.PORT || 5000}`,
+    endpoints: [
+      {
+        method: 'GET',
+        path: '/api/health',
+        description: 'Simple health check',
+        response: { status: 'OK', uptime: 'number', timestamp: 'ISO string' },
+      },
+      {
+        method: 'GET',
+        path: '/api/test-db',
+        description: 'Test database connection with SELECT NOW()',
+        response: { success: 'boolean', timestamp: 'datetime', message: 'string' },
+      },
+      {
+        method: 'GET',
+        path: '/api/db-status',
+        description: 'Get pool status and connection details',
+        response: { success: 'boolean', pool: 'object', connection: 'object' },
+      },
+      {
+        method: 'POST',
+        path: '/api/sensor-data',
+        description: 'Ingest real-time sensor data, compute DHI and create alerts',
+        requestBody: {
+          drain_id: 'number',
+          water_level_cm: 'number',
+          flow_rate_l_min: 'number',
+        },
+      },
+      {
+        method: 'GET',
+        path: '/api/latest-status',
+        description: 'Get the latest DHI/status snapshot for each drain',
+        response: { success: 'boolean', data: 'array', summary: 'object' },
+      },
+      {
+        method: 'GET',
+        path: '/api/alerts',
+        description: 'Get recent alerts for the dashboard',
+        response: { success: 'boolean', data: 'array' },
+      },
+      {
+        method: 'GET',
+        path: '/api/drains',
+        description: 'Get drain master records with the latest health snapshot',
+        response: { success: 'boolean', data: 'array' },
+      },
+    ],
+  });
+});
 
 // ============================================
-// API ROUTES
+// ERROR HANDLERS
 // ============================================
 
-// GET /sensor-data - Fetch all sensor readings
-app.get("/sensor-data", async (req, res) => {
-  try {
-    const limit = req.query.limit ? parseInt(req.query.limit) : 100;
-    
-    if (isNaN(limit) || limit < 1 || limit > 1000) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid limit parameter. Must be between 1 and 1000"
-      });
-    }
+// 404 Not Found handler
+app.use((req, res) => {
+  console.warn(`[404] ${req.method} ${req.path} not found`);
 
-    const data = await getAllSensorReadings(limit);
+  res.status(404).json({
+    success: false,
+    message: 'Endpoint not found',
+  });
+});
 
-    res.json({
-      success: true,
-      count: data.length,
-      data: data
-    });
-  } catch (err) {
-    console.error("Error in GET /sensor-data:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch sensor readings",
-      message: err.message
-    });
+// Global error handling middleware (must be last)
+app.use((err, req, res, next) => {
+  const statusCode = err.status || err.statusCode || 500;
+  console.error('[ERROR]', err.message);
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.error('[ERROR-STACK]', err.stack);
   }
+
+  res.status(statusCode).json({
+    success: false,
+    message: statusCode >= 500 ? 'Internal server error' : err.message,
+  });
 });
 
-// GET /sensor-data/:drain_id - Fetch sensor readings for specific drain
-app.get("/sensor-data/:drain_id", async (req, res) => {
-  try {
-    const drain_id = parseInt(req.params.drain_id);
-    const limit = req.query.limit ? parseInt(req.query.limit) : 50;
-
-    if (isNaN(drain_id)) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid drain_id. Must be a number"
-      });
-    }
-
-    if (isNaN(limit) || limit < 1 || limit > 500) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid limit parameter. Must be between 1 and 500"
-      });
-    }
-
-    const data = await getSensorReadingsByDrain(drain_id, limit);
-
-    res.json({
-      success: true,
-      drain_id: drain_id,
-      count: data.length,
-      data: data
-    });
-  } catch (err) {
-    console.error("Error in GET /sensor-data/:drain_id:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch sensor readings for drain",
-      message: err.message
-    });
-  }
-});
-
-const buildPath = path.join(__dirname, "build");
-app.use(express.static(buildPath));
-
-app.get("/{*any}", (req, res) => {
-  res.sendFile(path.join(buildPath, "index.html"));
-});
+// ============================================
+// SERVER STARTUP
+// ============================================
 
 const PORT = process.env.PORT || 5000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
 
-async function ensureAuthorityAccountsTable() {
-  let connection;
-  try {
-    connection = await pool.getConnection();
-    
-    await connection.execute(`
-      CREATE TABLE IF NOT EXISTS authority_accounts (
-        account_id INT PRIMARY KEY AUTO_INCREMENT,
-        full_name VARCHAR(120) NOT NULL,
-        authority_id VARCHAR(60) NOT NULL,
-        designation VARCHAR(100) NOT NULL,
-        department VARCHAR(120) NOT NULL,
-        email VARCHAR(120) NOT NULL,
-        phone VARCHAR(30) NOT NULL,
-        zone VARCHAR(100) NOT NULL,
-        office_address VARCHAR(255) NOT NULL,
-        username VARCHAR(80) NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        created_at DATETIME NOT NULL,
-        UNIQUE KEY uq_authority_id (authority_id),
-        UNIQUE KEY uq_email (email),
-        UNIQUE KEY uq_username (username)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-    
-    console.log("✓ authority_accounts table initialized successfully");
-  } catch (err) {
-    console.error("✗ Error initializing authority_accounts table:", err.message);
-    // Don't throw - allow server to continue
-  } finally {
-    if (connection) connection.release();
-  }
-}
+let server;
 
-/**
- * Initialize database on server startup
- */
-async function initializeDatabase() {
-  try {
-    // Test connection
-    const connection = await pool.getConnection();
-    await connection.execute("SELECT 1");
-    connection.release();
-    console.log("✓ Connected to MySQL database");
-
-    // Initialize tables
-    await initializeSensorTable();
-    await ensureAuthorityAccountsTable();
-    
-    console.log("✓ All database tables initialized successfully");
-    return true;
-  } catch (err) {
-    console.error("✗ Database initialization error:", err.message);
-    console.warn("⚠ Continuing without database setup - ensure database is configured");
-    return false;
-  }
-}
-
-/**
- * Start Express server
- */
 async function startServer() {
   try {
-    await initializeDatabase();
-  } catch (err) {
-    console.error("Database initialization failed:", err.message);
-  }
+    console.log('[SERVER] Starting Express server...\n');
 
-  app.listen(PORT, () => {
-    console.log(`✓ Server running on port ${PORT}`);
-    console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
-  });
+    // Start HTTP server
+    server = app.listen(PORT, () => {
+      console.log(`
+╔════════════════════════════════════════════════╗
+║     Smart Drain API - Supabase Backend       ║
+╠════════════════════════════════════════════════╣
+║  Status:      ✓ Running                       ║
+║  Port:        ${PORT}                                   ║
+║  Environment: ${NODE_ENV}                       ║
+║  Database:    PostgreSQL (Supabase)           ║
+╚════════════════════════════════════════════════╝
+      `);
+
+      console.log('📍 Server URLs:');
+      console.log(`   • Root:       http://localhost:${PORT}`);
+      console.log(`   • Health:     http://localhost:${PORT}/api/health`);
+      console.log(`   • Test DB:    http://localhost:${PORT}/api/test-db`);
+      console.log(`   • Pool Info:  http://localhost:${PORT}/api/db-status`);
+      console.log(`   • Dashboard:  http://localhost:${PORT}/api/latest-status`);
+      console.log(`   • Docs:       http://localhost:${PORT}/docs\n`);
+
+      console.log('💡 Tip: Use curl or Postman to test endpoints\n');
+    });
+  } catch (error) {
+    console.error('❌ [STARTUP] Failed to start server:', error.message);
+    process.exit(1);
+  }
 }
 
-// Start the server
+// ============================================
+// GRACEFUL SHUTDOWN
+// ============================================
+
+/**
+ * Handle graceful shutdown on signals
+ */
+async function gracefulShutdown(signal) {
+  console.log(`\n[SHUTDOWN] ${signal} received. Starting graceful shutdown...\n`);
+
+  if (server) {
+    server.close(async () => {
+      console.log('[SHUTDOWN] HTTP server closed');
+
+      // Close database pool
+      await closePool();
+
+      console.log('✓ [SHUTDOWN] Graceful shutdown complete');
+      process.exit(0);
+    });
+
+    // Force exit after 15 seconds
+    setTimeout(() => {
+      console.error('❌ [SHUTDOWN] Forced exit due to timeout');
+      process.exit(1);
+    }, 15000);
+  } else {
+    process.exit(0);
+  }
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ [UNCAUGHT] Uncaught exception:', error);
+  gracefulShutdown('uncaughtException');
+});
+
+// Handle unhandled rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ [UNHANDLED] Unhandled rejection at:', promise, 'reason:', reason);
+});
+
+// ============================================
+// START SERVER
+// ============================================
+
 startServer();
+
+export default app;
+
