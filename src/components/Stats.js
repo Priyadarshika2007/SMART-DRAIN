@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import API_BASE from "../config/api";
+import API_BASE from "../config/api.js";
 
 function Stats() {
   const [totalDrains, setTotalDrains] = useState(0);

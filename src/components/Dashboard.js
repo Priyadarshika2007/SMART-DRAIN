@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import API_BASE from "../config/api";
+import API_BASE from "../config/api.js";
 
 function Dashboard() {
   const [latestStatus, setLatestStatus] = useState([]);

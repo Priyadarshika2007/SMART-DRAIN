@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import API_BASE from "../config/api";
+import API_BASE from "../config/api.js";
 
 function Alerts() {
   const [alerts, setAlerts] = useState([]);

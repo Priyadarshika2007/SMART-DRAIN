@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import "./App.css";
-import Navbar from "./components/Navbar";
-import Hero from "./components/Hero";
-import Dashboard from "./components/Dashboard";
-import Alerts from "./components/Alerts";
-import Login from "./components/Login";
-import About from "./components/About";
-import Register from "./components/Register";
-import Footer from "./components/Footer";
+import Navbar from "./components/Navbar.js";
+import Hero from "./components/Hero.js";
+import Dashboard from "./components/Dashboard.js";
+import Alerts from "./components/Alerts.js";
+import Login from "./components/Login.js";
+import About from "./components/About.js";
+import Register from "./components/Register.js";
+import Footer from "./components/Footer.js";
 
 function App() {
   const [page, setPage] = useState("home");

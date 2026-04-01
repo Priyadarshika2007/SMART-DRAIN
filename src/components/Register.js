@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import API_BASE from "../config/api";
+import API_BASE from "../config/api.js";
 
 function Register({ setPage }) {
   const [showPassword, setShowPassword] = useState(false);
