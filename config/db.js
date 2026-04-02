@@ -11,22 +11,17 @@ if (!process.env.DATABASE_URL) {
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl: process.env.NODE_ENV === 'production'
+    ? { rejectUnauthorized: false }
+    : false,
 });
 
-pool.connect()
-  .then((client) => {
-    console.log('[DB] Database connected');
-    client.release();
-  })
-  .catch((err) => {
-    console.error('[DB] Database connection error:', err.message);
-  });
+pool.on('connect', () => {
+  console.log('✅ Database connected');
+});
 
 pool.on('error', (err) => {
-  console.error('[DB] Unexpected database pool error:', err.message);
+  console.error('❌ Database error:', err.message);
 });
 
 // ============================================

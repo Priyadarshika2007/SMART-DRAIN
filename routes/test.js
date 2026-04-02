@@ -9,6 +9,40 @@ import {
 
 const router = express.Router();
 
+async function runDbTest(req, res) {
+  try {
+    console.log('[DB-TEST] Running query: SELECT NOW()');
+
+    const result = await pool.query('SELECT NOW() as timestamp');
+    const timestamp = result.rows?.[0]?.timestamp;
+
+    if (!timestamp) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database query did not return a timestamp',
+      });
+    }
+
+    console.log('[DB-TEST] Database connection successful at', timestamp);
+
+    return res.status(200).json({
+      success: true,
+      connected: true,
+      timestamp,
+      message: 'Database connected successfully',
+      serverTime: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('[DB-TEST] Database connection failed:', error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Database connection failed',
+      error: error.message,
+    });
+  }
+}
+
 // ============================================
 // ENDPOINTS
 // ============================================
@@ -35,34 +69,14 @@ router.get(
   '/test-db',
   [...validateNoBodyForGet, ...validateDebugFlagQuery],
   handleValidationErrors,
-  async (req, res) => {
-  try {
-    console.log('[TEST-DB] Database connection test started');
-    console.log('[TEST-DB] Running query: SELECT NOW()');
+  runDbTest
+);
 
-    // Execute query
-    const result = await pool.query('SELECT NOW() as timestamp');
-
-    if (!result.rows || result.rows.length === 0) {
-      return res.status(500).json({ success: false, message: 'Internal server error' });
-    }
-
-    const timestamp = result.rows[0].timestamp;
-    console.log('[TEST-DB] ✓ Query successful at', timestamp);
-
-    res.status(200).json({
-      success: true,
-      connected: true,
-      timestamp: timestamp,
-      message: 'Database connected successfully',
-      serverTime: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('[TEST-DB] ✗ Connection test failed:', error.message);
-
-    res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-}
+router.get(
+  '/db-test',
+  validateNoBodyForGet,
+  handleValidationErrors,
+  runDbTest
 );
 
 /**

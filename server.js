@@ -29,6 +29,7 @@ console.log('[CONFIG] Environment variables validated ✓\n');
 
 const app = express();
 app.disable('x-powered-by');
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(secureHeaders);
@@ -72,6 +73,7 @@ app.get('/', (req, res) => {
     status: 'running',
     endpoints: {
       health: 'GET /api/health',
+      dbTest: 'GET /api/db-test',
       testDb: 'GET /api/test-db',
       dbStatus: 'GET /api/db-status',
       docs: 'GET /docs',
@@ -96,6 +98,12 @@ app.get('/docs', (req, res) => {
         path: '/api/health',
         description: 'Simple health check',
         response: { status: 'OK', uptime: 'number', timestamp: 'ISO string' },
+      },
+      {
+        method: 'GET',
+        path: '/api/db-test',
+        description: 'Test database connection with SELECT NOW()',
+        response: { success: 'boolean', timestamp: 'datetime', message: 'string' },
       },
       {
         method: 'GET',
