@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 const { Pool } = pkg;
 
 dotenv.config();
+const isProduction = process.env.NODE_ENV === 'production';
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is required. Add it to environment variables before starting the server.');
@@ -11,17 +12,20 @@ if (!process.env.DATABASE_URL) {
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production'
-    ? { rejectUnauthorized: false }
-    : false,
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
+
+// Optional: force SSL even if env fails
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 pool.on('connect', () => {
   console.log('✅ Database connected');
 });
 
 pool.on('error', (err) => {
-  console.error('❌ Database error:', err.message);
+  console.error('❌ Database error:', err);
 });
 
 // ============================================
