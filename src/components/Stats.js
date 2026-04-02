@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import API_BASE from "../config/api.js";
+import API_BASE from "../config.js";
 
 function Stats() {
   const [totalDrains, setTotalDrains] = useState(0);
@@ -21,8 +21,8 @@ function Stats() {
         setError("");
 
         const [drainsRes, alertsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/drains`),
-          fetch(`${API_BASE}/api/alerts`)
+          fetch(`${API_BASE}/drains`),
+          fetch(`${API_BASE}/alerts`)
         ]);
 
         if (!drainsRes.ok || !alertsRes.ok) {

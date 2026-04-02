@@ -44,7 +44,7 @@ const frontendPath = fs.existsSync(frontendDir)
 app.use(secureHeaders);
 app.use(express.json());
 app.use(cors({
-  origin: ["http://localhost:3000", "https://smart-drain.onrender.com"],
+  origin: '*',
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true,
 }));
@@ -102,15 +102,11 @@ app.get('/', (req, res) => {
 app.use('/api', dashboardRoutes);
 app.use('/api', sensorRoutes);
 app.use('/api', testRoutes);
+app.use('/', dashboardRoutes);
 
 app.get('/api/test', (req, res) => {
   console.log('✅ API TEST HIT');
   res.send('API WORKING');
-});
-
-app.get('/alerts', (req, res) => {
-  console.log('✅ ALERTS API HIT');
-  res.json({ message: 'alerts working' });
 });
 
 // Explicit API pass-through guard before frontend middleware

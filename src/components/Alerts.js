@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import API_BASE from "../config/api.js";
+import API_BASE from "../config.js";
 
 function Alerts() {
   const [alerts, setAlerts] = useState([]);
@@ -19,7 +19,7 @@ function Alerts() {
         setLoading(true);
         setError("");
 
-        const response = await fetch(`${API_BASE}/api/alerts`);
+        const response = await fetch(`${API_BASE}/alerts`);
         if (!response.ok) {
           throw new Error("Failed to fetch alerts");
         }

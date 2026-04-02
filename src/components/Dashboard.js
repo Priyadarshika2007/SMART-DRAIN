@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import API_BASE from "../config/api.js";
+import API_BASE from "../config.js";
 
 function Dashboard() {
   const [latestStatus, setLatestStatus] = useState([]);
@@ -37,9 +37,9 @@ function Dashboard() {
         setError("");
 
         const [latestResponse, alertsResponse, drainsResponse] = await Promise.all([
-          fetch(`${API_BASE}/api/latest-status`),
-          fetch(`${API_BASE}/api/alerts`),
-          fetch(`${API_BASE}/api/drains`)
+          fetch(`${API_BASE}/latest-status`),
+          fetch(`${API_BASE}/alerts`),
+          fetch(`${API_BASE}/drains`)
         ]);
 
         if (!latestResponse.ok || !alertsResponse.ok || !drainsResponse.ok) {
