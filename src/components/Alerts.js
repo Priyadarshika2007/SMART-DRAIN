@@ -25,7 +25,7 @@ function Alerts() {
         }
 
         const data = await response.json();
-        setAlerts(Array.isArray(data?.data) ? data.data : []);
+        setAlerts(Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : []);
       } catch (err) {
         setError(err.message || "Unable to load alerts");
       } finally {

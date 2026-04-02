@@ -32,8 +32,11 @@ function Stats() {
         const drainsJson = await drainsRes.json();
         const alertsJson = await alertsRes.json();
 
-        const drainsCount = Array.isArray(drainsJson?.data) ? drainsJson.data.length : 0;
-        const alertsCount = Array.isArray(alertsJson?.data) ? alertsJson.data.length : 0;
+        const drainsRows = Array.isArray(drainsJson) ? drainsJson : Array.isArray(drainsJson?.data) ? drainsJson.data : [];
+        const alertsRows = Array.isArray(alertsJson) ? alertsJson : Array.isArray(alertsJson?.data) ? alertsJson.data : [];
+
+        const drainsCount = drainsRows.length;
+        const alertsCount = alertsRows.length;
 
         setTotalDrains(drainsCount);
         setTotalAlerts(alertsCount);

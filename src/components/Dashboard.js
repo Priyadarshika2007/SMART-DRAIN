@@ -24,6 +24,12 @@ function Dashboard() {
   useEffect(() => {
     let isMounted = true;
 
+    const toRows = (payload) => {
+      if (Array.isArray(payload)) return payload;
+      if (Array.isArray(payload?.data)) return payload.data;
+      return [];
+    };
+
     const fetchDashboardData = async () => {
       if (!API_BASE) {
         console.error("REACT_APP_BACKEND_URL is undefined. Dashboard API calls cannot run.");
@@ -56,9 +62,9 @@ function Dashboard() {
           return;
         }
 
-        setLatestStatus(Array.isArray(latestJson?.data) ? latestJson.data : []);
-        setAlerts(Array.isArray(alertsJson?.data) ? alertsJson.data : []);
-        setDrains(Array.isArray(drainsJson?.data) ? drainsJson.data : []);
+        setLatestStatus(toRows(latestJson));
+        setAlerts(toRows(alertsJson));
+        setDrains(toRows(drainsJson));
       } catch (err) {
         if (isMounted) {
           setError(err.message || "Failed to load dashboard");
