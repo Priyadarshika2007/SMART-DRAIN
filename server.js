@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import testRoutes from './routes/test.js';
 import sensorRoutes from './routes/sensor.js';
 import dashboardRoutes from './routes/dashboard.js';
@@ -30,6 +32,9 @@ console.log('[CONFIG] Environment variables validated ✓\n');
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const frontendPath = path.join(__dirname, 'build');
 
 // Middleware
 app.use(secureHeaders);
@@ -73,8 +78,10 @@ app.get('/', (req, res) => {
     status: 'running',
     endpoints: {
       health: 'GET /api/health',
+      test: 'GET /api/test',
       dbTest: 'GET /api/db-test',
       testDb: 'GET /api/test-db',
+      readings: 'GET /api/readings',
       dbStatus: 'GET /api/db-status',
       docs: 'GET /docs',
     },
@@ -101,6 +108,12 @@ app.get('/docs', (req, res) => {
       },
       {
         method: 'GET',
+        path: '/api/test',
+        description: 'Basic API health check',
+        response: { success: 'boolean', message: 'string' },
+      },
+      {
+        method: 'GET',
         path: '/api/db-test',
         description: 'Test database connection with SELECT NOW()',
         response: { success: 'boolean', timestamp: 'datetime', message: 'string' },
@@ -110,6 +123,12 @@ app.get('/docs', (req, res) => {
         path: '/api/test-db',
         description: 'Test database connection with SELECT NOW()',
         response: { success: 'boolean', timestamp: 'datetime', message: 'string' },
+      },
+      {
+        method: 'GET',
+        path: '/api/readings',
+        description: 'Get the latest 50 sensor readings',
+        response: { success: 'boolean', count: 'number', data: 'array' },
       },
       {
         method: 'GET',
@@ -149,9 +168,16 @@ app.get('/docs', (req, res) => {
   });
 });
 
-// ============================================
-// ERROR HANDLERS
-// ============================================
+// Frontend assets and SPA fallback must come after API routes
+app.use(express.static(frontendPath));
+
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+
+  return res.sendFile(path.join(frontendPath, 'index.html'));
+});
 
 // 404 Not Found handler
 app.use((req, res) => {
@@ -206,8 +232,10 @@ async function startServer() {
 
       console.log('📍 Server URLs:');
       console.log(`   • Root:       http://localhost:${PORT}`);
+      console.log(`   • API Test:   http://localhost:${PORT}/api/test`);
+      console.log(`   • DB Test:    http://localhost:${PORT}/api/db-test`);
       console.log(`   • Health:     http://localhost:${PORT}/api/health`);
-      console.log(`   • Test DB:    http://localhost:${PORT}/api/test-db`);
+      console.log(`   • Readings:   http://localhost:${PORT}/api/readings`);
       console.log(`   • Pool Info:  http://localhost:${PORT}/api/db-status`);
       console.log(`   • Dashboard:  http://localhost:${PORT}/api/latest-status`);
       console.log(`   • Docs:       http://localhost:${PORT}/docs\n`);
