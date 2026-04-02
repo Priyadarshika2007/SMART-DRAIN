@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import testRoutes from './routes/test.js';
@@ -34,7 +35,10 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const frontendPath = path.join(__dirname, 'build');
+const frontendDir = path.join(__dirname, 'frontend');
+const frontendPath = fs.existsSync(frontendDir)
+  ? frontendDir
+  : path.join(__dirname, 'build');
 
 // Middleware
 app.use(secureHeaders);
@@ -45,6 +49,12 @@ app.use(cors({
   credentials: true,
 }));
 app.use('/api', apiRateLimiter);
+
+// Debug middleware to confirm routing path for every request
+app.use((req, res, next) => {
+  console.log('👉 Incoming request:', req.method, req.url);
+  next();
+});
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -92,6 +102,16 @@ app.get('/', (req, res) => {
 app.use('/api', dashboardRoutes);
 app.use('/api', sensorRoutes);
 app.use('/api', testRoutes);
+
+app.get('/api/test', (req, res) => {
+  console.log('✅ API TEST HIT');
+  res.send('API WORKING');
+});
+
+app.get('/alerts', (req, res) => {
+  console.log('✅ ALERTS API HIT');
+  res.json({ message: 'alerts working' });
+});
 
 // Explicit API pass-through guard before frontend middleware
 app.use('/api', (req, res, next) => next());
@@ -174,14 +194,9 @@ app.get('/docs', (req, res) => {
 // Frontend assets and SPA fallback must come after API routes
 app.use(express.static(frontendPath));
 
-// API 404 handler must stay before the SPA fallback
-app.use('/api', (req, res) => {
-  console.warn(`[404] ${req.method} ${req.path} not found`);
-
-  res.status(404).json({
-    success: false,
-    message: 'Endpoint not found',
-  });
+// Safe SPA fallback for non-API routes only
+app.get(/^\/(?!api).*/, (req, res) => {
+  return res.sendFile(path.join(frontendPath, 'index.html'));
 });
 
 // Global error handling middleware (must be last)
@@ -199,10 +214,22 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Frontend SPA fallback must be last and must not intercept API routes
-app.use((req, res, next) => {
+// API 404 handler must stay after all API routes
+app.use('/api', (req, res) => {
+  console.warn(`[404] ${req.method} ${req.path} not found`);
+  return res.status(404).json({
+    success: false,
+    message: 'Endpoint not found',
+  });
+});
+
+// Final fallback for non-API methods/routes
+app.use((req, res) => {
   if (req.path.startsWith('/api')) {
-    return next();
+    return res.status(404).json({
+      success: false,
+      message: 'Endpoint not found',
+    });
   }
 
   return res.sendFile(path.join(frontendPath, 'index.html'));
