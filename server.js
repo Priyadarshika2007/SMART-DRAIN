@@ -171,16 +171,12 @@ app.get('/docs', (req, res) => {
 // Frontend assets and SPA fallback must come after API routes
 app.use(express.static(frontendPath));
 
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) {
+// 404 Not Found handler
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api')) {
     return next();
   }
 
-  return res.sendFile(path.join(frontendPath, 'index.html'));
-});
-
-// 404 Not Found handler
-app.use((req, res) => {
   console.warn(`[404] ${req.method} ${req.path} not found`);
 
   res.status(404).json({
@@ -202,6 +198,18 @@ app.use((err, req, res, next) => {
     success: false,
     message: statusCode >= 500 ? 'Internal server error' : err.message,
   });
+});
+
+// Frontend SPA fallback must be last and must not intercept API routes
+app.use((req, res) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({
+      success: false,
+      message: 'Endpoint not found',
+    });
+  }
+
+  return res.sendFile(path.join(frontendPath, 'index.html'));
 });
 
 // ============================================
