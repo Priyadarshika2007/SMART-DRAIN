@@ -93,6 +93,9 @@ app.use('/api', dashboardRoutes);
 app.use('/api', sensorRoutes);
 app.use('/api', testRoutes);
 
+// Explicit API pass-through guard before frontend middleware
+app.use('/api', (req, res, next) => next());
+
 // Documentation endpoint
 app.get('/docs', (req, res) => {
   res.status(200).json({
@@ -171,12 +174,8 @@ app.get('/docs', (req, res) => {
 // Frontend assets and SPA fallback must come after API routes
 app.use(express.static(frontendPath));
 
-// 404 Not Found handler
-app.use((req, res, next) => {
-  if (!req.path.startsWith('/api')) {
-    return next();
-  }
-
+// API 404 handler must stay before the SPA fallback
+app.use('/api', (req, res) => {
   console.warn(`[404] ${req.method} ${req.path} not found`);
 
   res.status(404).json({
@@ -201,12 +200,9 @@ app.use((err, req, res, next) => {
 });
 
 // Frontend SPA fallback must be last and must not intercept API routes
-app.use((req, res) => {
+app.use((req, res, next) => {
   if (req.path.startsWith('/api')) {
-    return res.status(404).json({
-      success: false,
-      message: 'Endpoint not found',
-    });
+    return next();
   }
 
   return res.sendFile(path.join(frontendPath, 'index.html'));
