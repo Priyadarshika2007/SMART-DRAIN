@@ -46,7 +46,7 @@ function mapAlertRow(row) {
     area_name: row.area_name,
     alert_type: row.alert_type,
     severity: row.severity,
-    timestamp: row.timestamp,
+    timestamp: row.created_at || row.alert_time || row.timestamp || null,
   };
 }
 
@@ -123,44 +123,15 @@ router.get(
  * GET /api/alerts
  * Returns the latest alerts for the dashboard.
  */
-router.get('/alerts', validateNoBodyForGet, handleValidationErrors, async (req, res) => {
+router.get('/alerts', async (req, res) => {
   try {
-    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
-    const result = await pool.query(
-      `
-        SELECT
-          a.alert_id,
-          a.drain_id,
-          dm.area_name,
-          a.alert_type,
-          a.severity,
-          a.timestamp
-        FROM alert a
-        LEFT JOIN drain_master dm
-          ON dm.drain_id = a.drain_id
-        ORDER BY a.timestamp DESC NULLS LAST, a.alert_id DESC
-        LIMIT $1
-      `,
-      [limit]
-    );
-
-    const data = result.rows.map(mapAlertRow);
-
-    safeLog('[DASHBOARD] alerts loaded', {
-      count: data.length,
-    });
-
-    return res.status(200).json({
-      success: true,
-      data,
-      timestamp: new Date().toISOString(),
-    });
+    const result = await pool.query('SELECT * FROM alerts LIMIT 10');
+    return res.json(result.rows);
   } catch (error) {
-    console.error('[DASHBOARD] Failed to load alerts:', error.message);
-
+    console.error('ALERTS ERROR:', error.message);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error',
+      error: error.message,
     });
   }
 });
