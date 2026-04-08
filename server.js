@@ -276,7 +276,7 @@ app.use((req, res) => {
 // SERVER STARTUP
 // ============================================
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 let server;
@@ -287,6 +287,7 @@ async function startServer() {
 
     // Start HTTP server
     server = app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
       console.log(`
 ╔════════════════════════════════════════════════╗
 ║     Smart Drain API - Supabase Backend       ║
