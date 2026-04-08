@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { API } from "../config.js";
 
 function Login() {
   const navigate = useNavigate();
@@ -13,18 +12,25 @@ function Login() {
   const [forgotPassword, setForgotPassword] = useState("");
   const [forgotMessage, setForgotMessage] = useState("");
   const [forgotError, setForgotError] = useState("");
+  const apiBaseUrl = String(process.env.REACT_APP_API_URL || "").trim().replace(/\/+$/, "");
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    console.log("[LOGIN] request payload", { username: identifier, password });
+    const username = identifier.trim();
+    console.log("[LOGIN] request payload", { username, password });
     localStorage.removeItem("user");
 
+    if (!apiBaseUrl) {
+      setAuthError("API URL is not configured. Please set REACT_APP_API_URL.");
+      return;
+    }
+
     try {
-      const response = await fetch(`${API}/auth/login`, {
+      const response = await fetch(`${apiBaseUrl}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: identifier,
+          username,
           password,
         })
       });
@@ -66,8 +72,13 @@ function Login() {
       return;
     }
 
+    if (!apiBaseUrl) {
+      setForgotError("API URL is not configured. Please set REACT_APP_API_URL.");
+      return;
+    }
+
     try {
-      const response = await fetch(`${API}/auth/reset-password`, {
+      const response = await fetch(`${apiBaseUrl}/auth/reset-password`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

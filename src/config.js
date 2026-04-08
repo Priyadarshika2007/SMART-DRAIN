@@ -1,5 +1,5 @@
 const configuredApi = String(process.env.REACT_APP_API_URL || "").trim();
-const fallbackApi = "http://localhost:5001/api";
+const fallbackApi = "https://smart-drain-backend.onrender.com/api";
 const baseApi = configuredApi || fallbackApi;
 
 // Keep a single normalized API prefix for all frontend requests.
