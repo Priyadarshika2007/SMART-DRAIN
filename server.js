@@ -47,12 +47,8 @@ const frontendPath = fs.existsSync(frontendDir)
 app.use(secureHeaders);
 app.use(express.json());
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'https://smart-drain.onrender.com',
-  ],
+  origin: '*',
   methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true,
 }));
 app.use('/api', apiRateLimiter);
 
