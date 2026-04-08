@@ -112,6 +112,34 @@ app.get('/api/test', (req, res) => {
   res.send('API WORKING');
 });
 
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+
+  const users = [
+    { username: 'admin1', password: 'Admin@123', role: 'admin' },
+    { username: 'officer1', password: '12345', role: 'officer' },
+    { username: 'supervisor1', password: '12345', role: 'supervisor' },
+  ];
+
+  const user = users.find(
+    (u) => u.username === username && u.password === password
+  );
+
+  if (user) {
+    return res.json({
+      success: true,
+      message: 'Login successful',
+      role: user.role,
+      token: 'dummy-token',
+    });
+  }
+
+  return res.status(401).json({
+    success: false,
+    message: 'Invalid credentials',
+  });
+});
+
 app.get('/api/test-email', async (req, res) => {
   const receiver = String(process.env.ALERT_EMAIL || '').trim();
   const sent = await sendAlertEmail({
