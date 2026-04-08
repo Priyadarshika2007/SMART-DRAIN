@@ -35,32 +35,28 @@ function Login() {
         })
       });
 
-      const json = await response.json();
-      console.log("[LOGIN] API response", { ok: response.ok, status: response.status, body: json });
+      const data = await response.json();
+      console.log("[LOGIN] API response", { ok: response.ok, status: response.status, body: data });
 
-      if (!response.ok) {
-        throw new Error(json?.message || "Invalid username or password");
+      if (!response.ok || !data.success) {
+        throw new Error(data?.message || "Invalid username or password");
       }
 
-      if (json?.token) {
-        localStorage.setItem("token", json.token);
-      }
+      if (data.success) {
+        localStorage.setItem("token", "dummy-token");
+        localStorage.setItem("role", data.role);
 
-      if (json?.user) {
-        localStorage.setItem("user", JSON.stringify(json.user));
-        console.log("Logged user:", json.user);
-        console.log("Stored user:", JSON.parse(localStorage.getItem("user")));
+        navigate("/dashboard");
       }
     } catch (error) {
       console.error("[LOGIN] failed", error);
       localStorage.removeItem("token");
-      localStorage.removeItem("user");
+      localStorage.removeItem("role");
       setAuthError(error?.message || "Invalid username or password");
       return;
     }
 
     setAuthError("");
-    navigate("/dashboard");
   };
 
   const handleResetPassword = async () => {
