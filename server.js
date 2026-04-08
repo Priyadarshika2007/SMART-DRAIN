@@ -115,28 +115,21 @@ app.get('/api/test', (req, res) => {
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
 
-  const users = [
-    { username: 'admin1', password: 'Admin@123', role: 'admin' },
-    { username: 'officer1', password: '12345', role: 'officer' },
-    { username: 'supervisor1', password: '12345', role: 'supervisor' },
-  ];
+  if (username === 'admin1' && password === 'Admin@123') {
+    return res.json({ success: true, role: 'admin' });
+  }
 
-  const user = users.find(
-    (u) => u.username === username && u.password === password
-  );
+  if (username === 'officer1' && password === '12345') {
+    return res.json({ success: true, role: 'officer' });
+  }
 
-  if (user) {
-    return res.json({
-      success: true,
-      message: 'Login successful',
-      role: user.role,
-      token: 'dummy-token',
-    });
+  if (username === 'supervisor1' && password === '12345') {
+    return res.json({ success: true, role: 'supervisor' });
   }
 
   return res.status(401).json({
     success: false,
-    message: 'Invalid credentials',
+    message: 'Invalid credentials'
   });
 });
 
