@@ -1,17 +1,20 @@
+// Load environment variables FIRST (before everything)
+import dotenv from 'dotenv';
+dotenv.config();
+console.log("PORT FROM ENV:", process.env.PORT);
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import testRoutes from './routes/test.js';
 import sensorRoutes from './routes/sensor.js';
 import dashboardRoutes from './routes/dashboard.js';
+import authRoutes from './routes/auth.js';
+import sendAlertEmail from './utils/emailService.js';
 import { closePool } from './config/db.js';
 import { apiRateLimiter, secureHeaders, safeLog } from './middleware/security.js';
-
-// Load environment variables
-dotenv.config();
 
 // ============================================
 // ENVIRONMENT VALIDATION
@@ -101,11 +104,29 @@ app.get('/', (req, res) => {
 app.use('/api', dashboardRoutes);
 app.use('/api', sensorRoutes);
 app.use('/api', testRoutes);
+app.use('/api', authRoutes);
 app.use('/', dashboardRoutes);
 
 app.get('/api/test', (req, res) => {
   console.log('✅ API TEST HIT');
   res.send('API WORKING');
+});
+
+app.get('/api/test-email', async (req, res) => {
+  const receiver = String(process.env.ALERT_EMAIL || '').trim();
+  const sent = await sendAlertEmail({
+    email: receiver,
+    drainId: 101,
+    area: 'Test Area',
+    dhi: 95,
+    status: 'Critical',
+  });
+
+  return res.json({
+    message: sent ? 'Test email sent' : 'Test email failed',
+    sent,
+    to: receiver || null,
+  });
 });
 
 // Explicit API pass-through guard before frontend middleware
@@ -234,7 +255,7 @@ app.use((req, res) => {
 // SERVER STARTUP
 // ============================================
 
-const PORT = process.env.PORT || 5000;
+const PORT = 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 let server;

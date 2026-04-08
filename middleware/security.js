@@ -70,6 +70,7 @@ export const corsMiddleware = cors({
 export const apiRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
+  skip: (req) => req.method === 'GET',
   standardHeaders: true,
   legacyHeaders: false,
   message: {

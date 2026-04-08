@@ -1,12 +1,99 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { API } from "../config.js";
 
-function Login({ setPage }) {
+function Login() {
+  const navigate = useNavigate();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotUsername, setForgotUsername] = useState("");
+  const [forgotPassword, setForgotPassword] = useState("");
+  const [forgotMessage, setForgotMessage] = useState("");
+  const [forgotError, setForgotError] = useState("");
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
+    console.log("[LOGIN] request payload", { username: identifier, password });
+    localStorage.removeItem("user");
+
+    try {
+      const response = await fetch(`${API}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: identifier,
+          password,
+        })
+      });
+
+      const json = await response.json();
+      console.log("[LOGIN] API response", { ok: response.ok, status: response.status, body: json });
+
+      if (!response.ok) {
+        throw new Error(json?.message || "Invalid username or password");
+      }
+
+      if (json?.token) {
+        localStorage.setItem("token", json.token);
+      }
+
+      if (json?.user) {
+        localStorage.setItem("user", JSON.stringify(json.user));
+        console.log("Logged user:", json.user);
+        console.log("Stored user:", JSON.parse(localStorage.getItem("user")));
+      }
+    } catch (error) {
+      console.error("[LOGIN] failed", error);
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      setAuthError(error?.message || "Invalid username or password");
+      return;
+    }
+
+    setAuthError("");
+    navigate("/dashboard");
+  };
+
+  const handleResetPassword = async () => {
+    setForgotError("");
+    setForgotMessage("");
+
+    if (!forgotUsername || !forgotPassword) {
+      setForgotError("Username and new password are required");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API}/auth/reset-password`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: forgotUsername,
+          newPassword: forgotPassword,
+        }),
+      });
+
+      const json = await response.json();
+      if (!response.ok) {
+        throw new Error(json?.message || "Unable to update password");
+      }
+
+      setForgotMessage("Password updated");
+      setTimeout(() => {
+        setShowForgot(false);
+        setForgotUsername("");
+        setForgotPassword("");
+        setForgotMessage("");
+        navigate("/login");
+      }, 1000);
+    } catch (error) {
+      setForgotError(error?.message || "Unable to update password");
+    }
   };
 
   return (
@@ -29,7 +116,10 @@ function Login({ setPage }) {
               type="text"
               placeholder="Enter username or email"
               value={identifier}
-              onChange={(event) => setIdentifier(event.target.value)}
+              onChange={(event) => {
+                setIdentifier(event.target.value);
+                setAuthError("");
+              }}
               required
             />
           </div>
@@ -47,7 +137,10 @@ function Login({ setPage }) {
               type={showPassword ? "text" : "password"}
               placeholder="Enter your password"
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                setAuthError("");
+              }}
               required
             />
             <button
@@ -64,14 +157,64 @@ function Login({ setPage }) {
             Sign In
           </button>
 
-          <button type="button" className="create-account-btn" onClick={() => setPage("register")}>
+          {authError ? <p className="form-status error">{authError}</p> : null}
+
+          <button
+            type="button"
+            className="forgot-password-btn"
+            onClick={() => {
+              setShowForgot(true);
+              setForgotError("");
+              setForgotMessage("");
+            }}
+          >
+            Forgot Password?
+          </button>
+
+          <button type="button" className="create-account-btn" onClick={() => navigate("/register")}>
             Create Account
           </button>
 
           <p className="account-note">
-            No account yet? <button type="button" onClick={() => setPage("register")}>Create Account</button>
+            No account yet? <button type="button" onClick={() => navigate("/register")}>Create Account</button>
           </p>
         </form>
+
+        {showForgot && (
+          <section className="forgot-panel" aria-label="Reset password">
+            <h3>Reset Password</h3>
+            <input
+              type="text"
+              placeholder="Username"
+              value={forgotUsername}
+              onChange={(event) => setForgotUsername(event.target.value)}
+            />
+            <input
+              type="password"
+              placeholder="New Password"
+              value={forgotPassword}
+              onChange={(event) => setForgotPassword(event.target.value)}
+            />
+            <div className="forgot-actions">
+              <button type="button" className="submit-btn" onClick={handleResetPassword}>
+                Update Password
+              </button>
+              <button
+                type="button"
+                className="create-account-btn"
+                onClick={() => {
+                  setShowForgot(false);
+                  setForgotError("");
+                  setForgotMessage("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            {forgotError ? <p className="form-status error">{forgotError}</p> : null}
+            {forgotMessage ? <p className="form-status success">{forgotMessage}</p> : null}
+          </section>
+        )}
       </div>
     </section>
   );

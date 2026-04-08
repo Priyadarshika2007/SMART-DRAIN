@@ -1,175 +1,393 @@
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from "recharts";
-import API_BASE from "../config.js";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import DashboardSidebar from "./DashboardSidebar.js";
+import AlertsPage from "./dashboard/AlertsPage.js";
+import AnalyticsPage from "./dashboard/AnalyticsPage.js";
+import DashboardMain from "./dashboard/DashboardMain.js";
+import MapView from "../pages/MapView.js";
+import ProfilePage from "./ProfilePage.js";
+import EnhancedAlertsPage from "./EnhancedAlertsPage.js";
+import AdvancedAnalytics from "./AdvancedAnalytics.js";
+import UserManagement from "./UserManagement.js";
+import DrainManagement from "./DrainManagement.js";
+import ReportsPage from "./ReportsPage.js";
+import { API } from "../config.js";
+
+const safeNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseRows = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+};
+
+const DATA_MODE = "SIMULATION";
+
+const normalizeArea = (value) => String(value || "").trim().toLowerCase();
+const normalizeStatus = (value) => String(value || "").trim().toLowerCase();
+
+const parseTimestamp = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
+const buildAlertMessage = (severity) => {
+  if (severity === "Critical") return "High flood risk detected";
+  if (severity === "Moderate") return "Rising water level detected";
+  return "Normal";
+};
+
+const NAV_TITLES = {
+  dashboard: "Dashboard Overview",
+  alerts: "Alerts Monitoring",
+  analytics: "Analytics Insights",
+  map: "Map View",
+  profile: "Profile",
+  users: "👥 User Management",
+  drains: "💧 Drain Management",
+  reports: "📋 Reports & Exports",
+};
 
 function Dashboard() {
-  const [latestStatus, setLatestStatus] = useState([]);
-  const [alerts, setAlerts] = useState([]);
-  const [drains, setDrains] = useState([]);
+  const navigate = useNavigate();
+  const fetchInFlightRef = useRef(false);
+
+  const [activeNav, setActiveNav] = useState("dashboard");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [apiData, setApiData] = useState([]);
+  const [drainMetaData, setDrainMetaData] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
+    const userJson = localStorage.getItem("user");
+    if (!userJson) {
+      navigate("/login");
+      return;
+    }
+
+    try {
+      const parsedUser = JSON.parse(userJson);
+      setCurrentUser(parsedUser);
+    } catch {
+      navigate("/login");
+      return;
+    }
+
     let isMounted = true;
 
-    const toRows = (payload) => {
-      if (Array.isArray(payload)) return payload;
-      if (Array.isArray(payload?.data)) return payload.data;
-      return [];
+    const fetchLatestStatus = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const headers = {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Accept: "application/json",
+        };
+
+        const response = await fetch(`${API}/latest-status`, {
+          headers,
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch latest status (${response.status})`);
+        }
+
+        const rawBody = await response.text();
+        let json;
+
+        try {
+          json = JSON.parse(rawBody);
+        } catch {
+          console.error("JSON parse failed. Raw response:", rawBody.slice(0, 500));
+          throw new Error("Invalid JSON response. Check frontend URL/port and API endpoint.");
+        }
+
+        const data = parseRows(json).map((item) => ({
+          drain_id: item?.drain_id,
+          area_name: String(item?.area_name || "").trim(),
+          water_level_cm: safeNumber(item?.water_level_cm),
+          dhi_score: safeNumber(item?.dhi_score),
+          status: item?.status,
+          timestamp: parseTimestamp(item?.timestamp),
+        }));
+
+        console.log("DATA FROM API:", data);
+
+        if (!isMounted) return;
+        setApiData(data);
+        setError("");
+        setLoading(false);
+      } catch (fetchError) {
+        if (!isMounted) return;
+        setError(fetchError.message || "Failed to fetch data from server");
+        setLoading(false);
+      }
     };
 
-    const fetchDashboardData = async () => {
-      if (!API_BASE) {
-        console.error("REACT_APP_BACKEND_URL is undefined. Dashboard API calls cannot run.");
-        setError("Backend URL is not configured");
-        setLoading(false);
-        return;
+    const fetchDrainMetaData = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const headers = {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Accept: "application/json",
+        };
+
+        const response = await fetch(`${API}/drains`, { headers });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch drains (${response.status})`);
+        }
+
+        const json = await response.json();
+        const rows = parseRows(json).map((item) => ({
+          drain_id: item?.drain_id,
+          area_name: String(item?.area_name || "").trim(),
+          latitude: safeNumber(item?.latitude),
+          longitude: safeNumber(item?.longitude),
+        }));
+
+        if (!isMounted) return;
+        setDrainMetaData(rows);
+      } catch {
+        if (!isMounted) return;
+        setDrainMetaData([]);
       }
+    };
+
+    const fetchAll = async () => {
+      if (fetchInFlightRef.current) return;
+
+      fetchInFlightRef.current = true;
 
       try {
-        setLoading(true);
-        setError("");
-
-        const [latestResponse, alertsResponse, drainsResponse] = await Promise.all([
-          fetch(`${API_BASE}/latest-status`),
-          fetch(`${API_BASE}/alerts`),
-          fetch(`${API_BASE}/drains`)
-        ]);
-
-        if (!latestResponse.ok || !alertsResponse.ok || !drainsResponse.ok) {
-          throw new Error("Unable to fetch dashboard data");
-        }
-
-        const [latestJson, alertsJson, drainsJson] = await Promise.all([
-          latestResponse.json(),
-          alertsResponse.json(),
-          drainsResponse.json()
-        ]);
-
-        if (!isMounted) {
-          return;
-        }
-
-        setLatestStatus(toRows(latestJson));
-        setAlerts(toRows(alertsJson));
-        setDrains(toRows(drainsJson));
-      } catch (err) {
-        if (isMounted) {
-          setError(err.message || "Failed to load dashboard");
-        }
+        await Promise.all([fetchLatestStatus(), fetchDrainMetaData()]);
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        fetchInFlightRef.current = false;
       }
     };
 
-    fetchDashboardData();
+    fetchAll();
+    const intervalId = setInterval(fetchAll, 15000);
 
     return () => {
       isMounted = false;
+      clearInterval(intervalId);
     };
-  }, []);
+  }, [navigate]);
 
-  const drainChartData = useMemo(
-    () =>
-      latestStatus
-        .map((row) => ({
-          drain_id: String(row.drain_id),
-          label: row.area_name ? `${row.area_name} (${row.drain_id})` : `Drain ${row.drain_id}`,
-          dhi_score: Number(row.dhi_score || 0),
-          status: row.status || "Unknown",
-          timestamp: row.timestamp || null
-        }))
-        .sort((a, b) => Number(a.drain_id) - Number(b.drain_id))
-        .slice(0, 20),
-    [latestStatus]
-  );
+  const officerArea = useMemo(() => {
+    if (!currentUser) return "Velachery";
 
-  const pieData = useMemo(() => {
-    const severityMap = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+    // Check currentUser.area first (for admin with area: "ALL")
+    if (typeof currentUser.area === "string" && currentUser.area.trim()) {
+      return currentUser.area.trim();
+    }
 
-    alerts.forEach((row) => {
-      const key = String(row.severity || "").toUpperCase();
-      if (severityMap[key] !== undefined) {
-        severityMap[key] += 1;
-      }
-    });
+    const assignedAreas = currentUser?.assignedAreas;
+    if (Array.isArray(assignedAreas) && assignedAreas.length > 0) {
+      return String(assignedAreas[0]).trim() || "Velachery";
+    }
 
-    return [
-      { name: "HIGH", value: severityMap.HIGH, color: "#e53935" },
-      { name: "MEDIUM", value: severityMap.MEDIUM, color: "#fb8c00" },
-      { name: "LOW", value: severityMap.LOW, color: "#43a047" }
-    ];
-  }, [alerts]);
+    if (typeof assignedAreas === "string" && assignedAreas.trim()) {
+      return assignedAreas.trim();
+    }
 
-  const topRiskDrains = useMemo(
-    () =>
-      [...drainChartData]
-        .sort((a, b) => b.dhi_score - a.dhi_score)
-        .slice(0, 5)
-        .map((row) => ({
-          drain_id: row.label,
-          avg_dhi: Number(row.dhi_score.toFixed(2))
-        })),
-    [drainChartData]
-  );
+    return "Velachery";
+  }, [currentUser]);
 
-  const drainSnapshot = useMemo(
-    () =>
-      drains.slice(0, 8).map((row) => {
-        const latest = latestStatus.find(
-          (statusRow) => String(statusRow.drain_id) === String(row.drain_id)
-        );
+  const filteredData = useMemo(() => {
+    // If area is "ALL", return all data (for admin)
+    if (normalizeArea(officerArea) === normalizeArea("ALL")) {
+      return apiData;
+    }
+    // Otherwise filter by specific area
+    return apiData.filter(
+      (item) => normalizeArea(item.area_name) === normalizeArea(officerArea)
+    );
+  }, [apiData, officerArea]);
 
-        return {
-          drain_id: row.drain_id,
-          area_name: row.area_name,
-          dhi_score: latest ? Number(latest.dhi_score || 0) : null,
-          status: latest?.status || "Unknown",
-          latest_timestamp: latest?.timestamp || row.latest_timestamp || null
-        };
-      }),
-    [drains, latestStatus]
-  );
-
-  const kpi = useMemo(() => {
-    const uniqueDrains = drains.length || new Set(latestStatus.map((row) => row.drain_id)).size;
-    const totalAlerts = alerts.length;
-    const highRiskAlerts = alerts.filter(
-      (row) => String(row.severity || "").toUpperCase() === "HIGH"
-    ).length;
-
-    const avgDhi = latestStatus.length
-      ? latestStatus.reduce((sum, row) => sum + Number(row.dhi_score || 0), 0) /
-        latestStatus.length
-      : 0;
+  const kpis = useMemo(() => {
+    const totalDrains = filteredData.length;
+    const critical = filteredData.filter((d) => normalizeStatus(d?.status) === "critical").length;
+    const moderate = filteredData.filter((item) => normalizeStatus(item?.status) === "moderate").length;
+    const normal = filteredData.filter((item) => normalizeStatus(item?.status) === "normal").length;
+    const validDhiScores = filteredData
+      .map((item) => safeNumber(item?.dhi_score))
+      .filter((value) => value !== null);
+    const averageDhi =
+      validDhiScores.length > 0
+        ? validDhiScores.reduce((sum, value) => sum + value, 0) / validDhiScores.length
+        : null;
 
     return {
-      totalDrains: uniqueDrains,
-      totalAlerts,
-      highRiskAlerts,
-      averageDhi: avgDhi
+      totalDrains,
+      criticalAlerts: critical,
+      critical,
+      moderate,
+      normal,
+      averageDhi,
     };
-  }, [drains, latestStatus, alerts]);
+  }, [filteredData]);
+
+  const statusDistribution = useMemo(
+    () => [
+      { name: "Critical", value: kpis.criticalAlerts, color: "#b42318" },
+      { name: "Moderate", value: kpis.moderate, color: "#c2410c" },
+      { name: "Normal", value: kpis.normal, color: "#15803d" },
+    ],
+    [kpis]
+  );
+
+  const dhiBarData = useMemo(
+    () =>
+      filteredData.map((item) => ({
+        drainLabel: `Drain ${item?.drain_id ?? "-"}`,
+        dhiScore: safeNumber(item?.dhi_score) ?? 0,
+      })),
+    [filteredData]
+  );
+
+  const generatedAlerts = useMemo(
+    () => {
+      const priorityOrder = {
+        Critical: 1,
+        Moderate: 2,
+        Normal: 3,
+      };
+
+      return filteredData
+        .filter((item) => item?.status !== "Normal")
+        .map((item, index) => ({
+          id: `${item?.drain_id}-${item?.timestamp || index}`,
+          drain_id: item?.drain_id ?? "-",
+          severity: item?.status,
+          message: buildAlertMessage(item?.status),
+          timestamp: item?.timestamp,
+        }))
+        .sort((a, b) => {
+          const severityDiff =
+            (priorityOrder[a.severity] ?? 99) - (priorityOrder[b.severity] ?? 99);
+          if (severityDiff !== 0) return severityDiff;
+
+          const timeA = new Date(a.timestamp || 0).getTime();
+          const timeB = new Date(b.timestamp || 0).getTime();
+          return timeB - timeA;
+        });
+    },
+    [filteredData]
+  );
+
+  const mapRows = useMemo(() => {
+    const statusByDrain = new Map(filteredData.map((item) => [item.drain_id, item]));
+
+    return drainMetaData
+      .filter((row) => normalizeArea(row?.area_name) === normalizeArea(officerArea))
+      .map((row) => {
+        const statusSnapshot = statusByDrain.get(row.drain_id);
+
+        return {
+          ...row,
+          status: statusSnapshot?.status || "Unknown",
+        };
+      });
+  }, [drainMetaData, filteredData, officerArea]);
+
+  const formatWaterLevel = (value) => {
+    const parsedValue = safeNumber(value);
+    if (parsedValue === null || parsedValue <= 0) {
+      return DATA_MODE === "LIVE" ? "Sensor Offline" : "Simulated Data";
+    }
+
+    if (DATA_MODE === "SIMULATION") {
+      return `${parsedValue} cm (Simulated)`;
+    }
+
+    return `${parsedValue} cm`;
+  };
+
+  const modeLabel = DATA_MODE === "SIMULATION" ? "Simulation Mode" : "Live Mode";
+
+  useEffect(() => {
+    console.log("API Data:", apiData);
+    console.log("Filtered Data:", filteredData);
+  }, [apiData, filteredData]);
+
+  const handleLogout = () => {
+    localStorage.removeItem("user");
+    localStorage.removeItem("token");
+    navigate("/login");
+  };
+
+  const renderActivePage = () => {
+    if (activeNav === "alerts") {
+      return <EnhancedAlertsPage apiData={filteredData} />;
+    }
+
+    if (activeNav === "analytics") {
+      return (
+        <>
+          <AnalyticsPage filteredData={filteredData} />
+          <AdvancedAnalytics filteredData={filteredData} allData={apiData} />
+        </>
+      );
+    }
+
+    if (activeNav === "map") {
+      return <MapView />;
+    }
+
+    if (activeNav === "profile") {
+      return <ProfilePage user={currentUser} onUpdate={setCurrentUser} />;
+    }
+
+    // Admin-only pages
+    const isAdmin = String(currentUser?.role || "").toLowerCase() === "admin";
+
+    if (activeNav === "users") {
+      if (!isAdmin) {
+        return <div style={{ padding: "20px", color: "#999" }}>Access Denied. Admin only.</div>;
+      }
+      return <UserManagement apiData={apiData} />;
+    }
+
+    if (activeNav === "drains") {
+      if (!isAdmin) {
+        return <div style={{ padding: "20px", color: "#999" }}>Access Denied. Admin only.</div>;
+      }
+      return <DrainManagement apiData={apiData} />;
+    }
+
+    if (activeNav === "reports") {
+      const role = String(currentUser?.role || "").toLowerCase();
+      if (!["admin", "officer"].includes(role)) {
+        return <div style={{ padding: "20px", color: "#999" }}>Access Denied. Admin only.</div>;
+      }
+      return <ReportsPage filteredData={filteredData} apiData={apiData} user={currentUser} />;
+    }
+
+    return (
+      <DashboardMain
+        officerArea={officerArea}
+        kpis={kpis}
+        statusDistribution={statusDistribution}
+        dhiBarData={dhiBarData}
+        filteredData={filteredData}
+        formatWaterLevel={formatWaterLevel}
+      />
+    );
+  };
 
   if (loading) {
     return (
-      <section className="stats-section">
-        <div className="container">
-          <div className="dashboard-state-card">Loading dashboard...</div>
+      <section className="gov-dashboard-page">
+        <div className="gov-dashboard-layout">
+          <DashboardSidebar activeItem={activeNav} onNavigate={setActiveNav} user={currentUser} />
+          <div className="gov-dashboard-main">
+            <div className="gov-dashboard-shell">
+              <div className="gov-state-card">Loading dashboard data...</div>
+            </div>
+          </div>
         </div>
       </section>
     );
@@ -177,161 +395,40 @@ function Dashboard() {
 
   if (error) {
     return (
-      <section className="stats-section">
-        <div className="container">
-          <div className="dashboard-state-card dashboard-state-error">{error}</div>
+      <section className="gov-dashboard-page">
+        <div className="gov-dashboard-layout">
+          <DashboardSidebar activeItem={activeNav} onNavigate={setActiveNav} user={currentUser} />
+          <div className="gov-dashboard-main">
+            <div className="gov-dashboard-shell">
+              <div className="gov-state-card gov-state-error">{error}</div>
+            </div>
+          </div>
         </div>
       </section>
     );
   }
-
-  if (!latestStatus.length && !alerts.length && !drains.length) {
-    return (
-      <section className="stats-section">
-        <div className="container">
-          <div className="dashboard-state-card">No dashboard data available.</div>
-        </div>
-      </section>
-    );
-  }
-
-  const kpiCards = [
-    {
-      title: "Total Drains",
-      value: kpi.totalDrains,
-      description: "Unique monitored drain nodes"
-    },
-    {
-      title: "Total Alerts",
-      value: kpi.totalAlerts,
-      description: "All alert records from backend"
-    },
-    {
-      title: "High Risk Alerts",
-      value: kpi.highRiskAlerts,
-      description: "Alerts with HIGH severity"
-    },
-    {
-      title: "Average DHI Score",
-      value: kpi.averageDhi.toFixed(2),
-      description: "Average Drain Health Index"
-    }
-  ];
 
   return (
-    <section className="stats-section">
-      <div className="container">
-        <div className="stats-grid">
-          {kpiCards.map((card) => (
-            <article className="stat-card kpi-card" key={card.title}>
-              <h3 className="kpi-label">{card.title}</h3>
-              <p className="kpi-number">{card.value}</p>
-              <p className="kpi-meta">{card.description}</p>
-            </article>
-          ))}
-        </div>
+    <section className="gov-dashboard-page">
+      <div className="gov-dashboard-layout">
+        <DashboardSidebar activeItem={activeNav} onNavigate={setActiveNav} user={currentUser} />
 
-        <div className="dashboard-charts-grid">
-          <article className="dashboard-chart-card">
-            <h3>Latest DHI by Drain</h3>
-            <p className="chart-subtitle">Shows the latest Drain Health Index snapshot for each drain.</p>
-            <div className="chart-area">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={drainChartData} barCategoryGap="28%">
-                  <CartesianGrid stroke="#d8e5f4" strokeDasharray="4 4" />
-                  <XAxis
-                    dataKey="label"
-                    label={{ value: "Drain", position: "insideBottom", offset: -5 }}
-                  />
-                  <YAxis label={{ value: "DHI Score", angle: -90, position: "insideLeft" }} />
-                  <Tooltip />
-                  <Bar dataKey="dhi_score" fill="#0f7dd9" radius={[8, 8, 0, 0]} maxBarSize={52} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </article>
-
-          <article className="dashboard-chart-card">
-            <h3>Alert Severity Distribution</h3>
-            <p className="chart-subtitle">Shows proportion of HIGH, MEDIUM, and LOW alerts.</p>
-            <div className="chart-area">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={55}
-                    outerRadius={95}
-                  >
-                    {pieData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </article>
-
-          <article className="dashboard-chart-card dashboard-chart-wide">
-            <h3>Drain Snapshot</h3>
-            <p className="chart-subtitle">Latest monitored drains with their current status.</p>
-            <div className="chart-area">
-              {drainSnapshot.length > 0 ? (
-                <div className="alerts-table-wrap">
-                  <table className="alerts-table">
-                    <thead>
-                      <tr>
-                        <th>Drain</th>
-                        <th>Area</th>
-                        <th>DHI</th>
-                        <th>Status</th>
-                        <th>Updated</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {drainSnapshot.map((row) => (
-                        <tr key={row.drain_id}>
-                          <td>{row.drain_id}</td>
-                          <td>{row.area_name || "Unknown"}</td>
-                          <td>{row.dhi_score !== null ? row.dhi_score.toFixed(2) : "-"}</td>
-                          <td>{row.status}</td>
-                          <td>
-                            {row.latest_timestamp
-                              ? new Date(row.latest_timestamp).toLocaleString()
-                              : "-"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="dashboard-state-card">No drain snapshot available.</p>
-              )}
-            </div>
-          </article>
-
-          <article className="dashboard-chart-card dashboard-chart-wide">
-            <h3>Highest Risk Drains</h3>
-            <p className="chart-subtitle">Identifies the drains with the highest latest DHI score.</p>
-            <div className="chart-area">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topRiskDrains} barCategoryGap="28%">
-                  <CartesianGrid stroke="#d8e5f4" strokeDasharray="4 4" />
-                  <XAxis
-                    dataKey="drain_id"
-                    label={{ value: "Drain", position: "insideBottom", offset: -5 }}
-                  />
-                  <YAxis label={{ value: "Latest DHI Score", angle: -90, position: "insideLeft" }} />
-                  <Tooltip />
-                  <Bar dataKey="avg_dhi" fill="#1f68ad" radius={[8, 8, 0, 0]} maxBarSize={52} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </article>
+        <div className="gov-dashboard-main">
+          <div className="gov-dashboard-shell">
+            <header className="gov-topbar">
+              <div>
+                <h2>{NAV_TITLES[activeNav] || "Dashboard"}</h2>
+                <p>Assigned Area: {officerArea}</p>
+              </div>
+              <div className="gov-topbar-controls">
+                <span className="gov-mode-badge">Mode: {modeLabel}</span>
+                <button type="button" className="gov-logout-btn" onClick={handleLogout}>
+                  Logout
+                </button>
+              </div>
+            </header>
+            {renderActivePage()}
+          </div>
         </div>
       </div>
     </section>

@@ -1,8 +1,8 @@
 import React from "react";
 
-function About({ page }) {
+function About() {
   return (
-    <div className={`page ${page === "about" ? "active" : ""}`}>
+    <div className="page active">
       <section className="about-hero">
         <div className="container about-hero-content">
           <h1>

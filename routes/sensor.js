@@ -1,8 +1,81 @@
 import express from 'express';
 import pool from '../config/db.js';
 import { handleValidationErrors, validateSensorPayload } from '../middleware/validate.js';
+import sendAlertEmail from '../utils/emailService.js';
 
 const router = express.Router();
+
+async function insertIntoDrainHealthLog(area, level, status) {
+  try {
+    await pool.query(
+      'INSERT INTO drain_health_log(area, level, status) VALUES($1, $2, $3)',
+      [area, level, status]
+    );
+    return;
+  } catch (err) {
+    // Keep compatibility with existing schema that stores drain_id + dhi_score + status.
+    if (err.code !== '42703' && err.code !== '23502' && err.code !== '42P01') {
+      throw err;
+    }
+  }
+
+  const drainResult = await pool.query(
+    `SELECT drain_id
+     FROM drain_master
+     WHERE LOWER(area_name) = LOWER($1)
+     ORDER BY drain_id
+     LIMIT 1`,
+    [area]
+  );
+
+  let resolvedDrainId = drainResult.rows?.[0]?.drain_id;
+
+  if (!resolvedDrainId) {
+    const parsedId = Number(String(area || '').match(/\d+/)?.[0]);
+    if (Number.isFinite(parsedId) && parsedId > 0) {
+      const idResult = await pool.query(
+        'SELECT drain_id FROM drain_master WHERE drain_id = $1 LIMIT 1',
+        [parsedId]
+      );
+      resolvedDrainId = idResult.rows?.[0]?.drain_id;
+    }
+  }
+
+  if (!resolvedDrainId) {
+    const fallbackResult = await pool.query(
+      'SELECT drain_id FROM drain_master ORDER BY drain_id LIMIT 1'
+    );
+    resolvedDrainId = fallbackResult.rows?.[0]?.drain_id;
+  }
+
+  if (!resolvedDrainId) {
+    throw new Error('No drains available in drain_master');
+  }
+
+  await pool.query(
+    `INSERT INTO drain_health_log(drain_id, dhi_score, status)
+     VALUES($1, $2, $3)`,
+    [resolvedDrainId, Number(level), status]
+  );
+}
+
+async function getRecentDrainHealthLogs() {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM drain_health_log ORDER BY created_at DESC LIMIT 10'
+    );
+    return result.rows;
+  } catch (err) {
+    if (err.code !== '42703') {
+      throw err;
+    }
+
+    const result = await pool.query(
+      'SELECT * FROM drain_health_log ORDER BY timestamp DESC LIMIT 10'
+    );
+    return result.rows;
+  }
+}
 
 function calculateDhi(waterLevelCm, flowRateLMin) {
   return Number((waterLevelCm * 0.6 + flowRateLMin * 0.4).toFixed(2));
@@ -55,7 +128,7 @@ async function resyncPrimaryKeySequence(client) {
   `);
 }
 
-router.post('/sensor-data', validateSensorPayload, handleValidationErrors, async (req, res) => {
+async function processSensorPayload(req, res) {
   const { drain_id, water_level_cm, flow_rate_l_min } = req.body;
   const numericDrainId = Number(drain_id);
   const numericWaterLevel = Number(water_level_cm);
@@ -69,6 +142,7 @@ router.post('/sensor-data', validateSensorPayload, handleValidationErrors, async
 
   const dhiScore = calculateDhi(numericWaterLevel, numericFlowRate);
   const status = getDrainStatus(dhiScore);
+  const alertEmail = process.env.ALERT_EMAIL || process.env.EMAIL_USER;
 
   console.log(`[SENSOR] Computed DHI=${dhiScore}, status=${status}`);
 
@@ -124,7 +198,29 @@ router.post('/sensor-data', validateSensorPayload, handleValidationErrors, async
       console.log('[ALERT] Created alert record', alertRecord);
     }
 
+    let areaName = 'Unknown Area';
+    try {
+      const areaResult = await client.query(
+        'SELECT area_name FROM drain_master WHERE drain_id = $1 LIMIT 1',
+        [numericDrainId]
+      );
+      areaName = areaResult.rows?.[0]?.area_name || areaName;
+    } catch (areaError) {
+      console.warn('[ALERT] Unable to resolve area for email:', areaError.message);
+    }
+
     await client.query('COMMIT');
+
+    // Send email only for critical alerts. Email failures are logged and ignored.
+    if (status === 'Critical' && alertEmail) {
+      await sendAlertEmail({
+        email: alertEmail,
+        drainId: numericDrainId,
+        area: areaName,
+        dhi: dhiScore,
+        status,
+      });
+    }
 
     return res.status(201).json({
       success: true,
@@ -144,6 +240,47 @@ router.post('/sensor-data', validateSensorPayload, handleValidationErrors, async
     });
   } finally {
     client.release();
+  }
+}
+
+router.post('/sensor-data', validateSensorPayload, handleValidationErrors, processSensorPayload);
+router.post('/readings', validateSensorPayload, handleValidationErrors, processSensorPayload);
+
+router.post('/send-data', async (req, res) => {
+  try {
+    const { area, level, status } = req.body;
+
+    console.log('Incoming Data:', req.body);
+
+    await insertIntoDrainHealthLog(area, level, status);
+
+    return res.json({
+      success: true,
+      message: 'Data stored successfully',
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      success: false,
+      message: 'Database error',
+    });
+  }
+});
+
+router.get('/send-data', async (req, res) => {
+  try {
+    const rows = await getRecentDrainHealthLogs();
+
+    return res.json({
+      success: true,
+      data: rows,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      success: false,
+      message: 'Database error',
+    });
   }
 });
 

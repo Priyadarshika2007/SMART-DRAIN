@@ -1,52 +1,116 @@
 import React, { useEffect, useState } from "react";
-import API_BASE from "../config.js";
+import { API } from "../config.js";
+
+// Format time to HH:MM:SS AM/PM
+const formatTime = (date = new Date()) => {
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true
+  });
+};
+
+// Loading Spinner Component
+const LoadingSpinner = () => (
+  <div className="loading-container" style={{ padding: "40px", textAlign: "center" }}>
+    <div className="spinner"></div>
+    <p>Loading alerts...</p>
+  </div>
+);
 
 function Alerts() {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState(null);
 
+  // Auto-refresh every 5 seconds
   useEffect(() => {
+    let isMounted = true;
+    let refreshInterval;
+
     const fetchAlerts = async () => {
-      if (!API_BASE) {
-        console.error("REACT_APP_BACKEND_URL is undefined. Alerts API calls cannot run.");
-        setError("Backend URL is not configured");
-        setLoading(false);
+      if (!API) {
+        if (isMounted) {
+          setError("Backend URL is not configured");
+          setLoading(false);
+        }
         return;
       }
 
       try {
-        setLoading(true);
         setError("");
 
-        const response = await fetch(`${API_BASE}/alerts`);
-        if (!response.ok) {
-          throw new Error("Failed to fetch alerts");
+        const response = await fetch(`${API}/alerts`).catch(() => null);
+        if (!response?.ok) {
+          throw new Error("Server not reachable");
         }
 
         const data = await response.json();
+        console.log("Alerts API:", API);
+        console.log("Alerts data:", data);
+
+        if (!isMounted) return;
+
         setAlerts(Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : []);
-      } catch (err) {
-        setError(err.message || "Unable to load alerts");
-      } finally {
+        setLastUpdated(formatTime());
         setLoading(false);
+      } catch (err) {
+        if (isMounted) {
+          setError("Server not reachable");
+          setLoading(false);
+        }
       }
     };
 
+    // Initial fetch
     fetchAlerts();
+
+    // Set up auto-refresh interval (5 seconds)
+    refreshInterval = setInterval(fetchAlerts, 5000);
+
+    return () => {
+      isMounted = false;
+      if (refreshInterval) clearInterval(refreshInterval);
+    };
   }, []);
+
+  // Determine severity badge color
+  const getSeverityColor = (severity) => {
+    const level = String(severity || "").toUpperCase();
+    if (level === "HIGH") return "#ef4444";
+    if (level === "MEDIUM") return "#f97316";
+    return "#22c55e";
+  };
+
+  const getSeverityLabel = (severity) => {
+    const level = String(severity || "").toUpperCase();
+    if (level === "HIGH") return "🔴 HIGH";
+    if (level === "MEDIUM") return "🟠 MEDIUM";
+    return "🟢 LOW";
+  };
 
   return (
     <section className="alerts-section">
       <div className="container">
         <div className="alerts-card">
           <div className="alerts-header">
-            <h2>Recent Alerts</h2>
+            <h2>🔔 Recent Alerts</h2>
             <p>Drain health risk notifications from backend monitoring.</p>
+            {lastUpdated && (
+              <p className="last-updated-time">
+                🔄 Last updated: <strong>{lastUpdated}</strong>
+              </p>
+            )}
           </div>
 
-          {loading ? <p className="alerts-state">Loading...</p> : null}
-          {error ? <p className="alerts-state alerts-error">{error}</p> : null}
+          {loading ? <LoadingSpinner /> : null}
+          {error ? (
+            <p className="alerts-state alerts-error">
+              ⚠️ {error}
+            </p>
+          ) : null}
 
           {!loading && !error ? (
             alerts.length > 0 ? (
@@ -62,20 +126,36 @@ function Alerts() {
                   </thead>
                   <tbody>
                     {alerts.slice(0, 100).map((alert) => (
-                      <tr key={alert.alert_id}>
-                        <td>{alert.drain_id}</td>
-                        <td>{alert.alert_type}</td>
-                        <td className={String(alert.severity).toLowerCase()}>
-                          {alert.severity}
+                      <tr key={alert.alert_id} className="alert-row">
+                        <td>
+                          <strong>#{alert.drain_id}</strong>
                         </td>
-                        <td>{new Date(alert.timestamp).toLocaleString()}</td>
+                        <td>{alert.alert_type}</td>
+                        <td>
+                          <span
+                            style={{
+                              display: "inline-block",
+                              backgroundColor: getSeverityColor(alert.severity),
+                              color: "#fff",
+                              padding: "4px 12px",
+                              borderRadius: "20px",
+                              fontWeight: "bold",
+                              fontSize: "0.85rem"
+                            }}
+                          >
+                            {getSeverityLabel(alert.severity)}
+                          </span>
+                        </td>
+                        <td className="timestamp-cell">
+                          {new Date(alert.alert_time || alert.timestamp).toLocaleString()}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             ) : (
-              <p className="alerts-state">No alerts available.</p>
+              <p className="alerts-state">✅ No alerts available. System operating normally!</p>
             )
           ) : null}
         </div>

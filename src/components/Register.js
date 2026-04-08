@@ -1,41 +1,126 @@
-import React, { useState } from "react";
-import API_BASE from "../config.js";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { API } from "../config.js";
 
-function Register({ setPage }) {
+const ROLE_FIELD_OFFICER = "Field Officer";
+const ROLE_AREA_SUPERVISOR = "Area Supervisor";
+const ROLE_DISTRICT_HEAD = "District Head";
+
+const parseRows = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+};
+
+const getAreaName = (row) => String(row.area || row.area_name || "").trim();
+
+function Register() {
+  const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [statusType, setStatusType] = useState("idle");
+  const [areas, setAreas] = useState([]);
+  const [areasLoading, setAreasLoading] = useState(true);
 
   const [formData, setFormData] = useState({
     fullName: "",
-    authorityId: "",
-    designation: "",
-    department: "",
     email: "",
-    phone: "",
-    zone: "",
-    officeAddress: "",
+    role: ROLE_FIELD_OFFICER,
+    assignedAreas: [],
     username: "",
     password: "",
     confirmPassword: ""
   });
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchAreas = async () => {
+      if (!API) {
+        if (isMounted) {
+          setStatusType("error");
+          setStatusMessage("Backend URL is not configured.");
+          setAreasLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API}/drains`).catch(() => null);
+        if (!response?.ok) throw new Error("Server not reachable");
+
+        const payload = await response.json();
+        const rows = parseRows(payload);
+        const uniqueAreas = [...new Set(rows.map(getAreaName).filter(Boolean))].sort((a, b) =>
+          a.localeCompare(b)
+        );
+
+        if (!isMounted) return;
+        setAreas(uniqueAreas);
+        setAreasLoading(false);
+      } catch (error) {
+        if (!isMounted) return;
+        setStatusType("error");
+        setStatusMessage(error.message || "Server not reachable");
+        setAreasLoading(false);
+      }
+    };
+
+    fetchAreas();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!areas.length) return;
+
+    if (formData.role === ROLE_DISTRICT_HEAD) {
+      setFormData((prev) => ({ ...prev, assignedAreas: [...areas] }));
+      return;
+    }
+
+    if (formData.role === ROLE_FIELD_OFFICER) {
+      setFormData((prev) => ({
+        ...prev,
+        assignedAreas: prev.assignedAreas.length ? [prev.assignedAreas[0]] : [areas[0]]
+      }));
+      return;
+    }
+
+    if (formData.role === ROLE_AREA_SUPERVISOR) {
+      setFormData((prev) => {
+        const validAreas = prev.assignedAreas.filter((area) => areas.includes(area));
+        return { ...prev, assignedAreas: validAreas.length ? validAreas : [areas[0]] };
+      });
+    }
+  }, [areas, formData.role]);
+
+  const roleHelperText = useMemo(() => {
+    if (formData.role === ROLE_FIELD_OFFICER) return "Select one assigned area.";
+    if (formData.role === ROLE_AREA_SUPERVISOR) return "Select one or more assigned areas.";
+    return "District Head is automatically assigned to all areas.";
+  }, [formData.role]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  const handleSingleAreaChange = (event) => {
+    const value = event.target.value;
+    setFormData((prev) => ({ ...prev, assignedAreas: value ? [value] : [] }));
+  };
+
+  const handleMultiAreaChange = (event) => {
+    const values = Array.from(event.target.selectedOptions).map((option) => option.value);
+    setFormData((prev) => ({ ...prev, assignedAreas: values }));
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
-
-    if (!API_BASE) {
-      console.error("REACT_APP_BACKEND_URL is undefined. Register API calls cannot run.");
-      setStatusType("error");
-      setStatusMessage("Backend URL is not configured.");
-      return;
-    }
 
     if (formData.password !== formData.confirmPassword) {
       setStatusType("error");
@@ -43,56 +128,61 @@ function Register({ setPage }) {
       return;
     }
 
-    setIsSubmitting(true);
-    setStatusType("idle");
-    setStatusMessage("");
+    if (formData.password.length < 6) {
+      setStatusType("error");
+      setStatusMessage("Password must be at least 6 characters long.");
+      return;
+    }
+
+    if (!formData.assignedAreas.length) {
+      setStatusType("error");
+      setStatusMessage("Please choose at least one area.");
+      return;
+    }
 
     try {
-      const response = await fetch(`${API_BASE}/register-authority`, {
+      const payload = {
+        name: formData.fullName,
+        email: formData.email,
+        role: formData.role,
+        area: formData.role === ROLE_DISTRICT_HEAD ? "ALL" : formData.assignedAreas[0] || "",
+        assignedAreas: formData.role === ROLE_DISTRICT_HEAD ? ["ALL"] : formData.assignedAreas,
+        username: formData.username,
+        password: formData.password
+      };
+
+      console.log("[REGISTER] request payload", payload);
+
+      const response = await fetch(`${API}/auth/register`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          fullName: formData.fullName,
-          authorityId: formData.authorityId,
-          designation: formData.designation,
-          department: formData.department,
-          email: formData.email,
-          phone: formData.phone,
-          zone: formData.zone,
-          officeAddress: formData.officeAddress,
-          username: formData.username,
-          password: formData.password
-        })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
       });
 
-      const data = await response.json();
+      const json = await response.json();
+      console.log("[REGISTER] API response", { ok: response.ok, status: response.status, body: json });
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to create account.");
+      if (!response.ok) {
+        throw new Error(json?.message || "Unable to create account.");
+      }
+
+      if (json?.token) {
+        localStorage.setItem("token", json.token);
+      }
+
+      if (json?.user) {
+        localStorage.setItem("user", JSON.stringify(json.user));
       }
 
       setStatusType("success");
-      setStatusMessage("Account created successfully.");
-      setFormData({
-        fullName: "",
-        authorityId: "",
-        designation: "",
-        department: "",
-        email: "",
-        phone: "",
-        zone: "",
-        officeAddress: "",
-        username: "",
-        password: "",
-        confirmPassword: ""
-      });
+      setStatusMessage("Account created successfully. Redirecting to dashboard...");
+
+      setTimeout(() => {
+        navigate("/dashboard");
+      }, 1200);
     } catch (error) {
       setStatusType("error");
-      setStatusMessage(error.message || "Unable to create account right now.");
-    } finally {
-      setIsSubmitting(false);
+      setStatusMessage(error.message || "Unable to create account.");
     }
   };
 
@@ -100,10 +190,7 @@ function Register({ setPage }) {
     <section className="form-page container">
       <div className="form-card dark-login-card register-card">
         <h2>Create Authority Account</h2>
-        <p>
-          Register official credentials for UrbanDrain X access, monitoring permissions,
-          and secure operational reporting.
-        </p>
+        <p>Register official credentials for UrbanDrainX access and role-based operations.</p>
 
         <form className="login-form register-form" onSubmit={handleSubmit}>
           <label htmlFor="fullName">Full Name</label>
@@ -113,39 +200,6 @@ function Register({ setPage }) {
             type="text"
             placeholder="Officer full name"
             value={formData.fullName}
-            onChange={handleChange}
-            required
-          />
-
-          <label htmlFor="authorityId">Authority ID</label>
-          <input
-            id="authorityId"
-            name="authorityId"
-            type="text"
-            placeholder="UDX-AUTH-001"
-            value={formData.authorityId}
-            onChange={handleChange}
-            required
-          />
-
-          <label htmlFor="designation">Designation</label>
-          <input
-            id="designation"
-            name="designation"
-            type="text"
-            placeholder="Senior Drainage Officer"
-            value={formData.designation}
-            onChange={handleChange}
-            required
-          />
-
-          <label htmlFor="department">Department</label>
-          <input
-            id="department"
-            name="department"
-            type="text"
-            placeholder="Municipal Drainage Department"
-            value={formData.department}
             onChange={handleChange}
             required
           />
@@ -161,38 +215,50 @@ function Register({ setPage }) {
             required
           />
 
-          <label htmlFor="phone">Contact Number</label>
-          <input
-            id="phone"
-            name="phone"
-            type="tel"
-            placeholder="+91 98765 43210"
-            value={formData.phone}
-            onChange={handleChange}
-            required
-          />
+          <label htmlFor="role">Role</label>
+          <select id="role" name="role" value={formData.role} onChange={handleChange} required>
+            <option value={ROLE_FIELD_OFFICER}>{ROLE_FIELD_OFFICER}</option>
+            <option value={ROLE_AREA_SUPERVISOR}>{ROLE_AREA_SUPERVISOR}</option>
+            <option value={ROLE_DISTRICT_HEAD}>{ROLE_DISTRICT_HEAD}</option>
+          </select>
 
-          <label htmlFor="zone">Zone / Ward</label>
-          <input
-            id="zone"
-            name="zone"
-            type="text"
-            placeholder="Central Zone - Ward 12"
-            value={formData.zone}
-            onChange={handleChange}
-            required
-          />
+          <label htmlFor="assignedArea">Assigned Area</label>
+          {formData.role === ROLE_AREA_SUPERVISOR ? (
+            <select
+              id="assignedArea"
+              multiple
+              value={formData.assignedAreas}
+              onChange={handleMultiAreaChange}
+              disabled={areasLoading || !areas.length}
+              required
+            >
+              {areas.map((area) => (
+                <option key={area} value={area}>
+                  {area}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <select
+              id="assignedArea"
+              value={formData.assignedAreas[0] || ""}
+              onChange={handleSingleAreaChange}
+              disabled={areasLoading || !areas.length || formData.role === ROLE_DISTRICT_HEAD}
+              required
+            >
+              {formData.role === ROLE_DISTRICT_HEAD ? (
+                <option value="ALL">All Areas</option>
+              ) : (
+                areas.map((area) => (
+                  <option key={area} value={area}>
+                    {area}
+                  </option>
+                ))
+              )}
+            </select>
+          )}
 
-          <label htmlFor="officeAddress">Office Address</label>
-          <input
-            id="officeAddress"
-            name="officeAddress"
-            type="text"
-            placeholder="Municipal HQ, Block A"
-            value={formData.officeAddress}
-            onChange={handleChange}
-            required
-          />
+          <p className="register-hint">{areasLoading ? "Loading areas..." : roleHelperText}</p>
 
           <label htmlFor="username">Username</label>
           <input
@@ -260,7 +326,7 @@ function Register({ setPage }) {
           </div>
 
           <button type="submit" className="submit-btn">
-            {isSubmitting ? "Creating Account..." : "Create Account"}
+            Create Account
           </button>
 
           {statusMessage ? (
@@ -269,7 +335,7 @@ function Register({ setPage }) {
             </p>
           ) : null}
 
-          <button type="button" className="create-account-btn" onClick={() => setPage("login")}>
+          <button type="button" className="create-account-btn" onClick={() => navigate("/login")}>
             Back to Login
           </button>
         </form>

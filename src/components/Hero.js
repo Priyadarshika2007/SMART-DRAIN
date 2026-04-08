@@ -1,6 +1,9 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
-function Hero({ setPage }) {
+function Hero() {
+  const navigate = useNavigate();
+
   return (
     <section className="hero-section">
       <div className="hero-overlay" />
@@ -12,9 +15,18 @@ function Hero({ setPage }) {
         <p className="hero-tagline">
           Smart Drainage Monitoring for a Cleaner Tomorrow
         </p>
-        <button className="hero-button" onClick={() => setPage("about")}>
-          Learn About Our Project
-        </button>
+        <div className="hero-actions">
+          <button className="hero-button" onClick={() => navigate("/login")}>
+            Open Dashboard
+          </button>
+          <button
+            className="hero-button hero-button-secondary"
+            onClick={() => navigate("/guide")}
+          >
+            New User Guide
+          </button>
+        </div>
+        <p className="authority-notice">🔒 Access restricted to authorized municipal authorities</p>
       </div>
     </section>
   );

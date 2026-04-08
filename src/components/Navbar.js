@@ -1,10 +1,16 @@
 import React from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
-function Navbar({ page, setPage }) {
+function Navbar() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const isActive = (path) => location.pathname === path;
+
   return (
     <header className="navbar-wrap">
       <nav className="navbar container">
-        <button className="brand" onClick={() => setPage("home")}>
+        <button className="brand" onClick={() => navigate("/")}>
           <img src="/logo.jpg" alt="logo" />
           <span className="brand-title">
             UrbanDrain <span className="brand-x">X</span>
@@ -14,24 +20,24 @@ function Navbar({ page, setPage }) {
         <ul className="nav-links">
           <li>
             <button
-              className={page === "home" ? "nav-link active" : "nav-link"}
-              onClick={() => setPage("home")}
+              className={isActive("/") ? "nav-link active" : "nav-link"}
+              onClick={() => navigate("/")}
             >
               Home
             </button>
           </li>
           <li>
             <button
-              className={page === "about" ? "nav-link active" : "nav-link"}
-              onClick={() => setPage("about")}
+              className={isActive("/about") ? "nav-link active" : "nav-link"}
+              onClick={() => navigate("/about")}
             >
               About Us
             </button>
           </li>
           <li>
             <button
-              className={page === "login" ? "nav-link active" : "nav-link"}
-              onClick={() => setPage("login")}
+              className={isActive("/login") ? "nav-link active" : "nav-link"}
+              onClick={() => navigate("/login")}
             >
               Login
             </button>
