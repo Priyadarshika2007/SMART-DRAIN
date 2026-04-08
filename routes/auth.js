@@ -34,7 +34,7 @@ async function ensureDefaultUsers() {
   const defaults = [
     {
       username: 'admin1',
-      password: 'Admin@123',
+      password: 'Admin@999',
       role: 'Admin',
       area: 'ALL',
       name: 'Municipal Officer',
@@ -83,6 +83,13 @@ async function ensureDefaultUsers() {
     `UPDATE users
      SET role = 'Admin', area = 'ALL'
      WHERE username = 'admin1' AND LOWER(role) = 'district head'`
+  );
+
+  // One-time migration: update old seeded admin test password only.
+  await pool.query(
+    `UPDATE users
+     SET password = 'Admin@999'
+     WHERE username = 'admin1' AND password = 'Admin@123'`
   );
 }
 
@@ -219,7 +226,7 @@ router.post('/auth/login', loginValidation, async (req, res) => {
     }
 
     const fallbackUsers = [
-      { username: 'admin1', password: 'Admin@123', role: 'Admin', area: 'ALL', name: 'Municipal Officer' },
+      { username: 'admin1', password: 'Admin@999', role: 'Admin', area: 'ALL', name: 'Municipal Officer' },
       { username: 'officer1', password: '12345', role: 'Officer', area: 'Velachery', name: 'Field Officer' },
       { username: 'supervisor1', password: '12345', role: 'Supervisor', area: 'Triplicane', name: 'Area Supervisor' },
     ];

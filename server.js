@@ -115,7 +115,7 @@ app.get('/api/test', (req, res) => {
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
 
-  if (username === 'admin1' && password === 'Admin@123') {
+  if (username === 'admin1' && password === 'Admin@999') {
     return res.json({ success: true, role: 'admin' });
   }
 
