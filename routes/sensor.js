@@ -243,8 +243,107 @@ async function processSensorPayload(req, res) {
   }
 }
 
+async function insertSimpleReading(client, level) {
+  const columnResult = await client.query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_name = 'sensor_readings'`
+  );
+
+  const columns = new Set(columnResult.rows.map((row) => String(row.column_name || '').toLowerCase()));
+
+  if (columns.size === 0) {
+    throw new Error('sensor_readings table not found');
+  }
+
+  const values = [];
+  const selectedColumns = [];
+
+  if (columns.has('drain_id')) {
+    let drainId = 1;
+    try {
+      const drainResult = await client.query('SELECT drain_id FROM drain_master ORDER BY drain_id LIMIT 1');
+      if (drainResult.rows.length > 0) {
+        drainId = Number(drainResult.rows[0].drain_id) || 1;
+      }
+    } catch {
+      drainId = 1;
+    }
+
+    selectedColumns.push('drain_id');
+    values.push(drainId);
+  }
+
+  if (columns.has('water_level_cm')) {
+    selectedColumns.push('water_level_cm');
+    values.push(level);
+  } else if (columns.has('water_level')) {
+    selectedColumns.push('water_level');
+    values.push(level);
+  } else if (columns.has('level')) {
+    selectedColumns.push('level');
+    values.push(level);
+  } else {
+    throw new Error('sensor_readings table does not contain a level/water_level column');
+  }
+
+  if (columns.has('flow_rate_l_min')) {
+    selectedColumns.push('flow_rate_l_min');
+    values.push(0);
+  } else if (columns.has('flow_rate')) {
+    selectedColumns.push('flow_rate');
+    values.push(0);
+  }
+
+  if (columns.has('dhi_score')) {
+    selectedColumns.push('dhi_score');
+    values.push(level);
+  }
+
+  const placeholders = selectedColumns.map((_, index) => `$${index + 1}`);
+
+  const insertQuery = `
+    INSERT INTO sensor_readings (${selectedColumns.join(', ')})
+    VALUES (${placeholders.join(', ')})
+    RETURNING *
+  `;
+
+  const insertResult = await client.query(insertQuery, values);
+  return insertResult.rows[0] || null;
+}
+
 router.post('/sensor-data', validateSensorPayload, handleValidationErrors, processSensorPayload);
-router.post('/readings', validateSensorPayload, handleValidationErrors, processSensorPayload);
+router.post('/readings', async (req, res) => {
+  const level = Number(req.body?.level);
+
+  if (!Number.isFinite(level)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: [{ field: 'level', message: 'level must be a number' }],
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    const insertedReading = await insertSimpleReading(client, level);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Reading inserted successfully',
+      data: insertedReading,
+    });
+  } catch (error) {
+    console.error('[READINGS-POST] Failed to insert reading:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to insert reading',
+      error: error.message,
+    });
+  } finally {
+    client.release();
+  }
+});
 
 router.post('/send-data', async (req, res) => {
   try {
