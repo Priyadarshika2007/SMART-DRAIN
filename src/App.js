@@ -12,6 +12,7 @@ import LandingSections from "./components/LandingSections.js";
 import Dashboard from "./components/Dashboard.js";
 import Profile from "./components/Profile.js";
 import MapView from "./pages/MapView.js";
+import ProtectedRoute from "./components/ProtectedRoute.js";
 
 function App() {
   return (
@@ -32,9 +33,30 @@ function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/about" element={<About />} />
           <Route path="/guide" element={<Guide />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/map" element={<MapView />} />
-          <Route path="/profile" element={<Profile />} />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/map"
+            element={
+              <ProtectedRoute>
+                <MapView />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <Profile />
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardSidebar from "./DashboardSidebar.js";
+import { clearAuthSession } from "../utils/auth.js";
 
 function Profile() {
   const navigate = useNavigate();
@@ -76,7 +77,7 @@ function Profile() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("user");
+    clearAuthSession();
     navigate("/login");
   };
 

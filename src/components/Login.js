@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { API } from "../config.js";
+import { clearAuthSession, hasStoredAuth, saveAuthSession } from "../utils/auth.js";
 
 function Login() {
   const navigate = useNavigate();
@@ -12,21 +14,20 @@ function Login() {
   const [forgotPassword, setForgotPassword] = useState("");
   const [forgotMessage, setForgotMessage] = useState("");
   const [forgotError, setForgotError] = useState("");
-  const apiBaseUrl = String(process.env.REACT_APP_API_URL || "").trim().replace(/\/+$/, "");
+
+  useEffect(() => {
+    if (hasStoredAuth()) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [navigate]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     const username = identifier.trim();
     console.log("[LOGIN] request payload", { username, password });
-    localStorage.removeItem("user");
-
-    if (!apiBaseUrl) {
-      setAuthError("API URL is not configured. Please set REACT_APP_API_URL.");
-      return;
-    }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/login`, {
+      const response = await fetch(`${API}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -43,15 +44,24 @@ function Login() {
       }
 
       if (data.success) {
-        localStorage.setItem("token", "dummy-token");
-        localStorage.setItem("role", data.role);
+        const nextUser = data.user || {
+          username,
+          role: data?.role || "User",
+          area: String(data?.role || "").toLowerCase() === "admin" ? "ALL" : "",
+          assignedAreas: String(data?.role || "").toLowerCase() === "admin" ? ["ALL"] : [],
+        };
 
-        navigate("/dashboard");
+        saveAuthSession({
+          token: data.token || "",
+          user: nextUser,
+          role: nextUser.role,
+        });
+
+        navigate("/dashboard", { replace: true });
       }
     } catch (error) {
       console.error("[LOGIN] failed", error);
-      localStorage.removeItem("token");
-      localStorage.removeItem("role");
+      clearAuthSession();
       setAuthError(error?.message || "Invalid username or password");
       return;
     }
@@ -68,13 +78,13 @@ function Login() {
       return;
     }
 
-    if (!apiBaseUrl) {
+    if (!API) {
       setForgotError("API URL is not configured. Please set REACT_APP_API_URL.");
       return;
     }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/auth/reset-password`, {
+      const response = await fetch(`${API}/auth/reset-password`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

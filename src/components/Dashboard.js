@@ -12,6 +12,7 @@ import UserManagement from "./UserManagement.js";
 import DrainManagement from "./DrainManagement.js";
 import ReportsPage from "./ReportsPage.js";
 import { API } from "../config.js";
+import { clearAuthSession } from "../utils/auth.js";
 
 const safeNumber = (value) => {
   const parsed = Number(value);
@@ -314,8 +315,7 @@ function Dashboard() {
   }, [apiData, filteredData]);
 
   const handleLogout = () => {
-    localStorage.removeItem("user");
-    localStorage.removeItem("token");
+    clearAuthSession();
     navigate("/login");
   };
 

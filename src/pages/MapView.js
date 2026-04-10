@@ -161,15 +161,8 @@ function MapView() {
             const drainId = Number(drain?.drain_id ?? drain?.id);
             const latest = statusByDrainId.get(drainId);
 
-            let latitude = toNumber(drain?.latitude ?? drain?.lat);
-            let longitude = toNumber(drain?.longitude ?? drain?.lng);
-
-            if (latitude !== null && longitude !== null) {
-              // Correct common payload issues where lat/lng are swapped.
-              if (latitude > 90 || longitude < 70) {
-                [latitude, longitude] = [longitude, latitude];
-              }
-            }
+            const latitude = toNumber(drain?.latitude ?? drain?.lat);
+            const longitude = toNumber(drain?.longitude ?? drain?.lng);
 
             return {
               id: drainId,

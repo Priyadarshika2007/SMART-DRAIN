@@ -92,15 +92,31 @@ router.get('/alerts', optionalAuth, validateNoBodyForGet, handleValidationErrors
     const { requestedArea, scope } = resolveAreaFilter(req);
     const areaWhere = buildAreaPredicate(params, requestedArea, scope);
 
-    const result = await pool.query(`
-      SELECT
-        a.*, dm.area_name
-      FROM alert a
-      JOIN drain_master dm ON dm.drain_id = a.drain_id
-      ${areaWhere}
-      ORDER BY alert_time DESC
-      LIMIT 20
-    `, params);
+    let result;
+    try {
+      result = await pool.query(`
+        SELECT
+          a.*, dm.area_name, dm.area_name AS district
+        FROM alert a
+        JOIN drain_master dm ON dm.drain_id = a.drain_id
+        ${areaWhere}
+        ORDER BY a.created_at DESC
+      `, params);
+    } catch (queryError) {
+      // Fallback for environments where alert_time exists but created_at does not.
+      if (queryError.code !== '42703') {
+        throw queryError;
+      }
+
+      result = await pool.query(`
+        SELECT
+          a.*, dm.area_name, dm.area_name AS district
+        FROM alert a
+        JOIN drain_master dm ON dm.drain_id = a.drain_id
+        ${areaWhere}
+        ORDER BY a.alert_time DESC
+      `, params);
+    }
 
     return res.json(result.rows);
   } catch (err) {
