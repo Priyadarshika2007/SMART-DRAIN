@@ -52,7 +52,10 @@ const NAV_TITLES = {
   reports: "📋 Reports & Exports",
 };
 
-function Dashboard() {
+const IBM_COGNOS_EMBED_URL =
+  "https://us3.ca.analytics.ibm.com/bi/?perspective=dashboard&pathRef=.my_folders%2Fsmartdrain%2Bdashboard&closeWindowOnLastView=true&ui_appbar=false&ui_navbar=false&shareMode=embedded&action=view&mode=dashboard&subView=model0000019d300709e8_00000000&nav_filter=true";
+
+function OldDashboard() {
   const navigate = useNavigate();
   const fetchInFlightRef = useRef(false);
 
@@ -433,6 +436,33 @@ function Dashboard() {
       </div>
     </section>
   );
+}
+
+function Dashboard() {
+  const useIBM = true;
+
+  if (useIBM) {
+    return (
+      <section className="gov-dashboard-page">
+        <div className="gov-dashboard-layout">
+          <div className="gov-dashboard-main" style={{ width: "100%" }}>
+            <div className="gov-dashboard-shell">
+              <iframe
+                title="IBM Cognos Dashboard"
+                src={IBM_COGNOS_EMBED_URL}
+                width="100%"
+                height="600px"
+                style={{ border: "none" }}
+                allowFullScreen
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return <OldDashboard />;
 }
 
 export default Dashboard;
