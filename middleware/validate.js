@@ -21,20 +21,26 @@ export const validateSensorPayload = [
     .exists({ checkNull: true })
     .withMessage('drain_id is required')
     .bail()
-    .isNumeric()
-    .withMessage('drain_id must be a number'),
+    .custom((val) => {
+      if (typeof val === 'number' || (typeof val === 'string' && val.trim().length > 0)) {
+        return true;
+      }
+      throw new Error('drain_id must be a valid string or number');
+    }),
   body('water_level_cm')
     .exists({ checkNull: true })
     .withMessage('water_level_cm is required')
     .bail()
     .isNumeric()
     .withMessage('water_level_cm must be a number'),
-  body('flow_rate_l_min')
-    .exists({ checkNull: true })
-    .withMessage('flow_rate_l_min is required')
-    .bail()
-    .isNumeric()
-    .withMessage('flow_rate_l_min must be a number'),
+  body()
+    .custom((payload) => {
+      const flow = payload.flow_rate_l_min !== undefined ? payload.flow_rate_l_min : payload.flow_rate_lps;
+      if (flow === undefined || flow === null || isNaN(Number(flow))) {
+        throw new Error('Either flow_rate_l_min or flow_rate_lps must be a number');
+      }
+      return true;
+    }),
 ];
 
 export function handleValidationErrors(req, res, next) {

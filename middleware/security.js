@@ -9,6 +9,7 @@ const SENSITIVE_PATTERNS = [
   /key/gi,
   /authorization/gi,
   /database_url/gi,
+  /mongodb_uri/gi,
 ];
 
 export function redactSensitiveValue(value) {

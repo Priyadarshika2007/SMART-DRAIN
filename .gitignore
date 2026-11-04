@@ -1,4 +1,3 @@
-node_modules
 node_modules/
 build/
 
@@ -6,3 +5,15 @@ build/
 .env
 .env.*
 !.env.example
+
+# Spark build classes & logs
+spark-scala/target/classes/
+target/classes/
+*.log
+npm-debug.log*
+
+# System & IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,15 +1,13 @@
-@import url("https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=Merriweather:wght@700;800&display=swap");
-
 :root {
-  --bg: #d8dde7;
-  --surface: #ffffff;
-  --surface-alt: #f0f3f8;
-  --primary: #1f68ad;
-  --primary-dark: #155493;
-  --text: #f8fbff;
-  --muted: #c2d1e8;
-  --line: rgba(220, 233, 250, 0.2);
-  --shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  --bg: #0B1220;
+  --surface: #172638;
+  --surface-alt: #122536;
+  --primary: #35D6C2;
+  --primary-dark: #2bc0ad;
+  --text: #F4F7FB;
+  --muted: #B8C5D6;
+  --line: #304256;
+  --shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
 }
 
 * {
@@ -21,15 +19,28 @@ body,
 #root {
   margin: 0;
   min-height: 100%;
-  font-family: "Source Sans 3", sans-serif;
-  color: #11233a;
-  background: var(--bg);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #F4F7FB;
+  background-color: #0B1220;
 }
 
 .app-shell {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+.app-shell-auth {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.auth-page-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
 }
 
 .container {
@@ -2026,8 +2037,8 @@ input:focus {
 }
 
 .gov-dashboard-page {
-  padding: 26px 0 34px;
-  background: #f8fafc;
+  min-height: 100vh;
+  background: #0B1220;
 }
 
 .gov-dashboard-layout {
@@ -2153,15 +2164,22 @@ input:focus {
 }
 
 .gov-dashboard-main {
-  margin-left: 258px;
+  flex: 1;
+  min-width: 0;
+  margin-left: 0 !important;
+  width: 100%;
+  background-color: #0B1220;
 }
 
 .gov-dashboard-shell {
-  max-width: 1200px;
-  margin: 0 auto 0 0;
-  padding: 0 22px;
-  display: grid;
-  gap: 20px;
+  width: 100%;
+  max-width: 1680px;
+  margin: 0;
+  padding: 1.25rem 1.75rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
 .gov-critical-banner {
@@ -2257,98 +2275,112 @@ input:focus {
 
 .gov-kpi-grid {
   display: grid;
-  gap: 20px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
 
 .gov-kpi-card {
-  background: #ffffff;
-  border: 1px solid #e6eaf0;
-  border-radius: 12px;
-  padding: 18px;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
-  min-height: 170px;
+  background: linear-gradient(180deg, #162B40 0%, #112234 100%);
+  border: 1px solid #2A4359;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  min-height: 140px;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  justify-content: space-between;
+  transition: all 180ms ease;
+}
+
+.gov-kpi-card:hover {
+  border-color: #35D6C2;
 }
 
 .gov-kpi-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
 .gov-kpi-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: #eef2f7;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #102235;
+  border: 1px solid #2A4359;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .gov-kpi-card p,
 .gov-kpi-head p {
   margin: 0;
-  font-size: 13px;
-  color: #6b7280;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #8FA5BA;
 }
 
 .gov-kpi-card h3 {
-  margin: 10px 0 2px;
-  font-size: 28px;
-  color: #111827;
+  margin: 8px 0 2px;
+  font-size: 1.85rem;
+  font-weight: 800;
+  color: #F4F7FB;
   line-height: 1.1;
+  font-family: var(--font-family-display, sans-serif);
 }
 
 .gov-kpi-value {
-  margin-top: 12px;
-  margin-bottom: 4px;
+  margin-top: 8px;
+  margin-bottom: 2px;
+  color: #F4F7FB;
 }
 
 .gov-kpi-value-critical {
-  color: #b42318 !important;
+  color: #F16B78 !important;
 }
 
 .gov-kpi-value-moderate {
-  color: #c2410c !important;
+  color: #F5B84B !important;
 }
 
 .gov-kpi-value-normal {
-  color: #15803d !important;
+  color: #35D6C2 !important;
 }
 
 .gov-kpi-card small {
-  color: #6b7280;
-  font-size: 12px;
-  line-height: 1.45;
+  color: #B8C5D6;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  border-top: 1px solid rgba(42, 67, 89, 0.5);
+  padding-top: 6px;
+  margin-top: 6px;
+  display: block;
 }
 
 .gov-kpi-card.gov-kpi-critical {
-  border-color: #f6d4d1;
-  background: linear-gradient(180deg, #ffffff 0%, #fff7f6 100%);
+  border-top: 3px solid #F16B78;
 }
 
 .gov-kpi-card.is-critical .gov-kpi-value {
-  color: #dc2626 !important;
+  color: #F16B78 !important;
 }
 
 .gov-kpi-card.is-critical .gov-kpi-value.blink-critical-kpi {
-  animation: blink 1s infinite;
-  text-shadow: 0 0 10px rgba(220, 38, 38, 0.35);
+  animation: blink 1.2s ease-in-out infinite;
+  text-shadow: 0 0 12px rgba(241, 107, 120, 0.45);
 }
 
 .gov-kpi-card.gov-kpi-moderate {
-  border-color: #f8dec8;
-  background: linear-gradient(180deg, #ffffff 0%, #fff8f2 100%);
+  border-top: 3px solid #F5B84B;
 }
 
 .gov-kpi-card.gov-kpi-normal {
-  border-color: #d1ead8;
-  background: linear-gradient(180deg, #ffffff 0%, #f4fbf6 100%);
+  border-top: 3px solid #35D6C2;
 }
 
 .gov-health-track {

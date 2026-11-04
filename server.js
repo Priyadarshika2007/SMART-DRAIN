@@ -12,6 +12,8 @@ import testRoutes from './routes/test.js';
 import sensorRoutes from './routes/sensor.js';
 import dashboardRoutes from './routes/dashboard.js';
 import authRoutes from './routes/auth.js';
+import gasSafetyRoutes from './routes/gasSafety.js';
+import deviceHealthRoutes from './routes/deviceHealth.js';
 import sendAlertEmail from './utils/emailService.js';
 import { closePool } from './config/db.js';
 import { apiRateLimiter, secureHeaders, safeLog } from './middleware/security.js';
@@ -20,14 +22,16 @@ import { apiRateLimiter, secureHeaders, safeLog } from './middleware/security.js
 // ENVIRONMENT VALIDATION
 // ============================================
 
-const requiredEnvVars = ['DATABASE_URL'];
+const requiredEnvVars = ['MONGODB_URI'];
 const missingVars = requiredEnvVars.filter((envVar) => !process.env[envVar]);
 
 if (missingVars.length > 0) {
-  throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+  // If not explicitly set, fallback to default local instance
+  process.env.MONGODB_URI = 'mongodb://127.0.0.1:27017/urbandrainx';
+  console.warn(`[CONFIG] MONGODB_URI not set. Defaulting to ${process.env.MONGODB_URI}`);
+} else {
+  console.log('[CONFIG] Environment variables validated ✓\n');
 }
-
-console.log('[CONFIG] Environment variables validated ✓\n');
 
 // ============================================
 // EXPRESS APP SETUP
@@ -83,10 +87,18 @@ app.use((req, res, next) => {
 
 // Root endpoint
 app.get('/', (req, res) => {
+  // If requested by a web browser navigation, serve the frontend application
+  const isBrowserNav = req.headers['sec-fetch-mode'] === 'navigate' || 
+    (req.headers.accept && req.headers.accept.includes('application/xhtml+xml'));
+  if (isBrowserNav && fs.existsSync(path.join(frontendPath, 'index.html'))) {
+    return res.sendFile(path.join(frontendPath, 'index.html'));
+  }
+
+
   res.status(200).json({
     success: true,
-    message: 'Smart Drain API - Supabase PostgreSQL Backend',
-    version: '1.0.0',
+    message: 'URBANDRAIN 2.0 API - MongoDB Backend',
+    version: '2.0.0',
     status: 'running',
     endpoints: {
       health: 'GET /api/health',
@@ -103,6 +115,8 @@ app.get('/', (req, res) => {
 // API Routes
 app.use('/api', dashboardRoutes);
 app.use('/api', sensorRoutes);
+app.use('/api', gasSafetyRoutes);
+app.use('/api', deviceHealthRoutes);
 app.use('/api', testRoutes);
 app.use('/api', authRoutes);
 app.use('/', dashboardRoutes);
@@ -112,25 +126,10 @@ app.get('/api/test', (req, res) => {
   res.send('API WORKING');
 });
 
-app.post('/api/login', (req, res) => {
-  const { username, password } = req.body;
-
-  if (username === 'admin1' && password === 'Admin@999') {
-    return res.json({ success: true, role: 'admin' });
-  }
-
-  if (username === 'officer1' && password === '12345') {
-    return res.json({ success: true, role: 'officer' });
-  }
-
-  if (username === 'supervisor1' && password === '12345') {
-    return res.json({ success: true, role: 'supervisor' });
-  }
-
-  return res.status(401).json({
-    success: false,
-    message: 'Invalid credentials'
-  });
+app.post('/api/login', (req, res, next) => {
+  // Delegate directly to auth handler
+  req.url = '/auth/login';
+  return authRoutes(req, res, next);
 });
 
 app.get('/api/test-email', async (req, res) => {
@@ -156,8 +155,8 @@ app.use('/api', (req, res, next) => next());
 // Documentation endpoint
 app.get('/docs', (req, res) => {
   res.status(200).json({
-    title: 'Smart Drain API Documentation',
-    version: '1.0.0',
+    title: 'UrbanDrainX V2 API Documentation',
+    version: '2.0.0',
     baseUrl: `http://localhost:${process.env.PORT || 5000}`,
     endpoints: [
       {
@@ -290,12 +289,12 @@ async function startServer() {
       console.log(`Server running on port ${PORT}`);
       console.log(`
 ╔════════════════════════════════════════════════╗
-║     Smart Drain API - Supabase Backend       ║
+║   URBANDRAIN 2.0 API - MongoDB Backend       ║
 ╠════════════════════════════════════════════════╣
 ║  Status:      ✓ Running                       ║
 ║  Port:        ${PORT}                                   ║
 ║  Environment: ${NODE_ENV}                       ║
-║  Database:    PostgreSQL (Supabase)           ║
+║  Database:    MongoDB                         ║
 ╚════════════════════════════════════════════════╝
       `);
 

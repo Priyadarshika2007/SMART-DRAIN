@@ -1,6 +1,5 @@
 import express from 'express';
-import pool from '../config/db.js';
-import { testConnection, getPoolStatus } from '../config/db.js';
+import { getDb, testConnection, getPoolStatus } from '../config/db.js';
 import {
   handleValidationErrors,
   validateDebugFlagQuery,
@@ -18,29 +17,30 @@ router.get('/test', (req, res) => {
 
 async function runDbTest(req, res) {
   try {
-    console.log('[DB-TEST] Running query: SELECT NOW()');
+    console.log('[DB-TEST] Running MongoDB ping test');
 
-    const result = await pool.query('SELECT NOW() as timestamp');
-    const timestamp = result.rows?.[0]?.timestamp;
+    const result = await testConnection();
 
-    if (!timestamp) {
+    if (!result.connected) {
       return res.status(500).json({
         success: false,
-        message: 'Database query did not return a timestamp',
+        message: result.message || 'Database connection failed',
+        error: result.error,
       });
     }
 
-    console.log('[DB-TEST] Database connection successful at', timestamp);
+    console.log('[DB-TEST] Database connection successful at', result.timestamp);
 
     return res.status(200).json({
       success: true,
       connected: true,
-      timestamp,
-      message: 'Database connected successfully',
+      timestamp: result.timestamp,
+      database: result.database,
+      message: 'MongoDB connected successfully',
       serverTime: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('[DB-TEST] Database connection failed:', error.message);
+    console.error('[DB-TEST] Database connection test failed:', error.message);
 
     return res.status(500).json({
       success: false,
@@ -57,20 +57,19 @@ async function runDbTest(req, res) {
 /**
  * GET /api/health
  * Simple health check endpoint
- * Returns: { status: string, uptime: number, timestamp: string }
  */
 router.get('/health', validateNoBodyForGet, handleValidationErrors, (req, res) => {
-  console.log('[HEALTH] Health check requested');
-
   res.status(200).json({
     status: 'Backend working',
+    database: 'MongoDB',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
   });
 });
 
 /**
  * GET /api/test-db
- * Test database connection with SELECT NOW()
- * Returns: { success: boolean, timestamp: string, message: string }
+ * Test database connection
  */
 router.get(
   '/test-db',
@@ -86,21 +85,25 @@ router.get(
   runDbTest
 );
 
+/**
+ * GET /api/readings
+ * Return latest 50 sensor readings
+ */
 router.get('/readings', validateNoBodyForGet, handleValidationErrors, async (req, res) => {
   try {
-    console.log('[READINGS] Latest sensor readings requested');
-
-    const result = await pool.query(`
-      SELECT *
-      FROM sensor_readings
-      ORDER BY timestamp DESC
-      LIMIT 50
-    `);
+    const db = await getDb();
+    const readings = await db
+      .collection('sensor_readings')
+      .find({})
+      .sort({ timestamp: -1, recorded_at: -1 })
+      .limit(50)
+      .project({ _id: 0 })
+      .toArray();
 
     return res.status(200).json({
       success: true,
-      count: result.rows.length,
-      data: result.rows,
+      count: readings.length,
+      data: readings,
     });
   } catch (error) {
     console.error('[READINGS] Failed to fetch readings:', error.message);
@@ -115,18 +118,23 @@ router.get('/readings', validateNoBodyForGet, handleValidationErrors, async (req
 
 /**
  * GET /api/db-status
- * Check pool connection status and statistics
- * Returns: { success: boolean, pool: object, status: object }
+ * Check MongoDB connection status and collection statistics
  */
 router.get('/db-status', validateNoBodyForGet, handleValidationErrors, async (req, res) => {
   try {
-    console.log('[DB-STATUS] Pool status requested');
-
-    // Get pool status
     const poolStatus = getPoolStatus();
-
-    // Test connection
     const testResult = await testConnection();
+    const db = await getDb();
+
+    // Fetch collection counts
+    const [usersCount, drainsCount, devicesCount, readingsCount, analyticsCount, alertsCount] = await Promise.all([
+      db.collection('users').countDocuments().catch(() => 0),
+      db.collection('drains').countDocuments().catch(() => 0),
+      db.collection('devices').countDocuments().catch(() => 0),
+      db.collection('sensor_readings').countDocuments().catch(() => 0),
+      db.collection('analytics_results').countDocuments().catch(() => 0),
+      db.collection('alerts').countDocuments().catch(() => 0),
+    ]);
 
     res.status(200).json({
       success: true,
@@ -137,16 +145,23 @@ router.get('/db-status', validateNoBodyForGet, handleValidationErrors, async (re
         message: testResult.message,
       },
       database: {
-        type: 'PostgreSQL (Supabase)',
-        host: process.env.DATABASE_URL?.split('@')[1]?.split(':')[0] || 'unknown',
-        ssl: 'enabled',
+        type: 'MongoDB',
+        name: db.databaseName,
+        status: 'Connected',
+        collections: {
+          users: usersCount,
+          drains: drainsCount,
+          devices: devicesCount,
+          sensor_readings: readingsCount,
+          analytics_results: analyticsCount,
+          alerts: alertsCount,
+        },
       },
       serverTime: new Date().toISOString(),
     });
   } catch (error) {
     console.error('[DB-STATUS] Status check failed:', error.message);
-
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
   }
 });
 

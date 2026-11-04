@@ -85,3 +85,43 @@ export function enforceAreaAccess(req, res, next) {
 
   return next();
 }
+
+/**
+ * Enforce role permissions on backend routes
+ * @param {string|string[]} allowedRoles - 'Admin', 'Authority', 'Worker'
+ */
+export function requireRole(allowedRoles = []) {
+  const roles = (Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles])
+    .map((r) => String(r).trim().toLowerCase());
+
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    const userRole = String(req.user.role || '').trim().toLowerCase();
+    const normalizedUserRole =
+      userRole === 'admin' || userRole === 'district head' || userRole === 'administrator'
+        ? 'admin'
+        : userRole === 'authority' || userRole === 'officer' || userRole === 'field officer' || userRole === 'operator'
+          ? 'authority'
+          : 'worker';
+
+    const hasAccess = roles.some((r) => {
+      if (r === 'admin') return normalizedUserRole === 'admin';
+      if (r === 'authority') return normalizedUserRole === 'admin' || normalizedUserRole === 'authority';
+      if (r === 'worker') return true;
+      return normalizedUserRole === r;
+    });
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: `Forbidden: This operation requires [${roles.join(', ')}] role privileges. Your account role is '${req.user.role}'.`,
+      });
+    }
+
+    return next();
+  };
+}
+

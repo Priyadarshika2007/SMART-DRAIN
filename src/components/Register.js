@@ -190,7 +190,7 @@ function Register() {
     <section className="form-page container">
       <div className="form-card dark-login-card register-card">
         <h2>Create Authority Account</h2>
-        <p>Register official credentials for UrbanDrainX access and role-based operations.</p>
+        <p>Register official credentials for URBANDRAIN 2.0 access and role-based operations.</p>
 
         <form className="login-form register-form" onSubmit={handleSubmit}>
           <label htmlFor="fullName">Full Name</label>

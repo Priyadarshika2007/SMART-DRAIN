@@ -1,6 +1,6 @@
 {
-  "name": "smart-drain",
-  "version": "1.0.0",
+  "name": "urban-drain",
+  "version": "2.0.0",
   "description": "",
   "private": true,
   "type": "module",
@@ -11,13 +11,16 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "server": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "import": "node scripts/importData.js",
+    "test:migration": "node scripts/testSuite.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "axios": "^1.14.0",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
@@ -26,8 +29,8 @@
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.3",
     "leaflet": "^1.9.4",
+    "mongodb": "^7.7.0",
     "nodemailer": "^8.0.5",
-    "pg": "^8.11.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-leaflet": "^4.2.1",
